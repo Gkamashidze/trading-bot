@@ -1,0 +1,62 @@
+# feature_flags.yaml — Declarative default feature flag definitions.
+# Actual runtime state is stored in DB (overrides these defaults).
+# Changes to this file require PR review + CHANGELOG entry.
+
+flags:
+  # ── Kill switches (safety-first) ──────────────────────────────────────────
+  live_trading_enabled:
+    default: false
+    description: "Master kill switch — enables live order submission"
+    owner: "ops"
+    critical: true    # changes to critical flags require dual-approval
+
+  paper_trading_enabled:
+    default: true
+    description: "Enables paper trading via Alpaca Paper / Binance Testnet"
+    owner: "ops"
+    critical: false
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+  websocket_enabled:
+    default: false
+    description: "Enables real-time WebSocket market data streams (Stage 2+)"
+    owner: "infra"
+    critical: false
+
+  data_ingestion_enabled:
+    default: true
+    description: "Enables APScheduler daily OHLCV ingestion jobs"
+    owner: "data"
+    critical: false
+
+  alerting_enabled:
+    default: true
+    description: "Enables Telegram / alert notifications"
+    owner: "ops"
+    critical: false
+
+  prometheus_enabled:
+    default: true
+    description: "Enables Prometheus /metrics endpoint"
+    owner: "infra"
+    critical: false
+
+  # ── Per-strategy flags (Stage 3+) ─────────────────────────────────────────
+  strategy_sma_enabled:
+    default: false
+    description: "Enables SMA crossover strategy signal generation"
+    owner: "quant"
+    critical: false
+
+  strategy_rsi_enabled:
+    default: false
+    description: "Enables RSI mean-reversion strategy signal generation"
+    owner: "quant"
+    critical: false
+
+  # ── Research safety ───────────────────────────────────────────────────────
+  canary_trade_enabled:
+    default: false
+    description: "Enables synthetic canary trades at market open (Stage 5+)"
+    owner: "ops"
+    critical: false

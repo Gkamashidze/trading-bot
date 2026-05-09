@@ -1,0 +1,75 @@
+{
+  "description": "Example replay fixture — BTC/USDT 2024-01-02 SMA signal",
+  "schema_version": "1.0",
+  "created_at": "2024-01-02T10:00:00Z",
+  "config_snapshot": {
+    "environment": "development",
+    "risk": {
+      "tier1_daily_drawdown_pct": 0.05,
+      "kelly_fraction": 0.25
+    }
+  },
+  "events": [
+    {
+      "event_id": "018d1234-0000-7000-8000-000000000001",
+      "event_type": "market.ohlcv",
+      "schema_version": "1.0",
+      "occurred_at": "2024-01-02T00:00:00Z",
+      "correlation_id": "corr-001",
+      "bar": {
+        "symbol": "BTC/USDT",
+        "exchange": "binance",
+        "timeframe": "1d",
+        "open_time": "2024-01-02T00:00:00Z",
+        "close_time": "2024-01-02T23:59:59Z",
+        "open": "43000.00",
+        "high": "44000.00",
+        "low": "42500.00",
+        "close": "43800.00",
+        "volume": "15000.00",
+        "quote_volume": "650000000.00",
+        "trade_count": 500000,
+        "fetched_at": "2024-01-03T01:00:00Z",
+        "source": "binance.fetch_ohlcv",
+        "schema_version": "1.0"
+      }
+    },
+    {
+      "event_id": "018d1234-0000-7000-8000-000000000002",
+      "event_type": "strategy.signal",
+      "schema_version": "1.0",
+      "occurred_at": "2024-01-02T01:00:00Z",
+      "correlation_id": "corr-001",
+      "signal": {
+        "signal_id": "sig-001",
+        "strategy_id": "sma_v1",
+        "strategy_version": "1.0.0",
+        "promotion_stage": "shadow",
+        "symbol": "BTC/USDT",
+        "exchange": "binance",
+        "side": "buy",
+        "strength": 0.75,
+        "generated_at": "2024-01-02T01:00:00Z",
+        "hypothesis": "50-SMA crossed above 200-SMA — golden cross",
+        "correlation_id": "corr-001"
+      }
+    },
+    {
+      "event_id": "018d1234-0000-7000-8000-000000000003",
+      "event_type": "risk.evaluation",
+      "schema_version": "1.0",
+      "occurred_at": "2024-01-02T01:00:01Z",
+      "correlation_id": "corr-001",
+      "signal_id": "sig-001",
+      "accepted": false,
+      "reason": "Strategy in shadow stage — signals not forwarded to execution",
+      "drawdown_pct": 0.0,
+      "tier": null
+    }
+  ],
+  "expected_outcomes": {
+    "signals_generated": 1,
+    "orders_submitted": 0,
+    "comment": "Shadow stage: signals observed but not executed"
+  }
+}

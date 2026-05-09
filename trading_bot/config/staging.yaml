@@ -1,0 +1,22 @@
+# staging.yaml — Paper trading environment overrides.
+# All keys point to testnets. live_trading_enabled is ALWAYS false here.
+
+config_version: "1.0.0"
+
+logging:
+  level: "INFO"
+  format: "json"
+
+otel:
+  exporter: "otlp"
+
+feature_flags:
+  defaults:
+    live_trading_enabled: false   # NEVER true in staging
+    paper_trading_enabled: true
+    websocket_enabled: true
+    data_ingestion_enabled: true
+
+exchange:
+  binance:
+    base_url: "https://testnet.binance.vision"

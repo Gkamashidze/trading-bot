@@ -1,0 +1,107 @@
+# ==============================================================================
+# base.yaml — Default configuration for all environments.
+# Secrets must NEVER appear here — inject via environment variables only.
+# This file is version-controlled. Changes go through PR review.
+# ==============================================================================
+
+config_version: "1.0.0"
+
+system:
+  name: "trading-bot"
+  version: "0.1.0"
+
+logging:
+  level: "INFO"
+  format: "json"           # json | console
+  include_caller: false
+
+database:
+  pool_min: 5
+  pool_max: 20
+  command_timeout: 30      # seconds
+
+prometheus:
+  port: 9090
+  path: "/metrics"
+  enabled: true
+
+otel:
+  service_name: "trading-bot"
+  exporter: "console"      # console | otlp
+  traces_sampler: "always_on"
+  # Sampling policy per span type (overrides sampler for hot paths)
+  order_sample_rate: 1.0   # 100% of order spans
+  data_fetch_sample_rate: 0.1  # 10% of data fetch spans
+
+feature_flags:
+  refresh_interval_seconds: 30
+  defaults:
+    live_trading_enabled: false   # KILL SWITCH — always false by default
+    paper_trading_enabled: true
+    websocket_enabled: true
+    data_ingestion_enabled: true
+    alerting_enabled: true
+
+risk:
+  # Drawdown circuit breaker tiers
+  tier1_daily_drawdown_pct: 0.05   # 5% → pause new positions
+  tier2_daily_drawdown_pct: 0.10   # 10% → full halt
+  tier3_daily_drawdown_pct: 0.15   # 15% → emergency liquidation
+  # Portfolio-level limits
+  max_portfolio_leverage: 1.0      # spot only — no leverage
+  reserved_cash_floor_pct: 0.10   # keep ≥ 10% in cash
+  max_single_asset_pct: 0.30       # max 30% of portfolio in one asset
+  max_single_exchange_pct: 0.50   # max 50% on one exchange
+  # Position sizing
+  kelly_fraction: 0.25             # fractional Kelly (1/4)
+  volatility_target_annual: 0.15  # 15% annualised vol target
+
+time_sync:
+  warn_drift_ms: 100     # log warning if drift > 100ms
+  alert_drift_ms: 250    # send alert if drift > 250ms
+  halt_drift_ms: 500     # halt trading if drift > 500ms
+  check_interval_seconds: 60
+
+data:
+  raw_base_path: "trading_bot/data/raw"
+  processed_base_path: "trading_bot/data/processed"
+  replay_base_path: "trading_bot/data/replay"
+  # Freshness thresholds — alert if data older than N × expected_interval
+  freshness_multiplier: 2
+  # Anomaly detection
+  return_zscore_threshold: 5.0
+
+scheduler:
+  # APScheduler — persistent job store uses DATABASE_URL
+  timezone: "UTC"
+  max_instances: 3
+  coalesce: true
+  misfire_grace_time: 300   # seconds
+
+exchange:
+  binance:
+    base_url: "https://api.binance.com"
+    testnet_url: "https://testnet.binance.vision"
+    rate_limit:
+      requests_per_minute: 1200
+      orders_per_second: 10
+    timeout_seconds: 10
+    retry_attempts: 4
+    retry_backoff_base: 2    # exponential: 2^n seconds
+
+  alpaca:
+    base_url: "https://paper-api.alpaca.markets"
+
+latency_budgets_ms:
+  data_ingestion: 50
+  signal_generation: 100
+  risk_check: 20
+  order_submission: 200
+  signal_to_fill_p99: 500
+
+audit_log:
+  enabled: true
+  # Hash algorithm for event chain
+  hash_algorithm: "sha256"
+  # Retention — enforced by DB partition policy
+  retention_days: 365

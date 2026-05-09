@@ -1,0 +1,91 @@
+# ── Secrets (NEVER commit) ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+secrets/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.installed.cfg
+lib/
+lib64/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+.venv/
+.uv/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── pytest / coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+.mutmut-cache/
+
+# ── mypy ─────────────────────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ── ruff ─────────────────────────────────────────────────────────────────────
+.ruff_cache/
+
+# ── Local data (raw market data — immutable, not in git) ──────────────────────
+trading_bot/data/raw/
+trading_bot/data/processed/
+*.parquet
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+trading_bot/logs/*.log
+trading_bot/logs/*.jsonl
+logs/
+
+# ── Database ─────────────────────────────────────────────────────────────────
+*.db
+*.sqlite3
+*.duckdb
+
+# ── Profiling ─────────────────────────────────────────────────────────────────
+*.memray
+*.prof
+flamegraphs/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# Keep migrations — DO NOT ignore alembic/versions/
+
+# ── detect-secrets baseline ───────────────────────────────────────────────────
+# Keep .secrets.baseline in git (it's a whitelist of known-false-positives)

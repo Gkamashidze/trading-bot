@@ -1,0 +1,26 @@
+# development.yaml — Overrides for local development.
+# Merges on top of base.yaml. Only specify values that differ.
+
+config_version: "1.0.0"
+
+logging:
+  level: "DEBUG"
+  format: "console"
+  include_caller: true
+
+otel:
+  exporter: "console"
+
+feature_flags:
+  defaults:
+    live_trading_enabled: false
+    paper_trading_enabled: true
+    websocket_enabled: false    # disabled until Stage 2
+    data_ingestion_enabled: true
+
+exchange:
+  binance:
+    base_url: "https://testnet.binance.vision"  # always testnet in dev
+
+scheduler:
+  misfire_grace_time: 3600     # relaxed for dev/debugging

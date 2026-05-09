@@ -1,0 +1,63 @@
+repos:
+  # ── Code formatting (must run before linting) ────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.7
+    hooks:
+      - id: ruff-format         # black-compatible formatter
+        name: ruff-format
+      - id: ruff                # linter
+        name: ruff-lint
+        args: [--fix, --exit-non-zero-on-fix]
+
+  # ── Type checking ─────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        name: mypy-typecheck
+        args: [--ignore-missing-imports, --no-strict-optional]
+        additional_dependencies:
+          - pydantic
+          - pydantic-settings
+          - structlog
+          - types-pyyaml
+          - types-cachetools
+
+  # ── Secret scanning (MANDATORY — no secrets in git) ────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        name: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: .*\.(lock|ipynb)$
+
+  # ── Large file guard ──────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-large-files
+        args: [--maxkb=500]
+      - id: check-yaml
+        name: check-yaml
+      - id: check-json
+        name: check-json
+      - id: check-toml
+        name: check-toml
+      - id: end-of-file-fixer
+        name: end-of-file-fixer
+      - id: trailing-whitespace
+        name: trailing-whitespace
+      - id: check-merge-conflict
+        name: check-merge-conflict
+      - id: no-commit-to-branch
+        args: [--branch, main]  # force PR workflow on main
+        name: no-commit-to-main
+
+  # ── Conventional Commits enforcement ─────────────────────────────────────
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.27.0
+    hooks:
+      - id: commitizen
+        name: commitizen-lint
+        stages: [commit-msg]

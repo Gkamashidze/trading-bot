@@ -1,0 +1,28 @@
+# production.yaml — Live trading environment overrides.
+# live_trading_enabled defaults to false — must be explicitly enabled via
+# DB-backed feature flag after all operational readiness checks pass.
+
+config_version: "1.0.0"
+
+logging:
+  level: "INFO"
+  format: "json"
+  include_caller: false
+
+otel:
+  exporter: "otlp"
+  order_sample_rate: 1.0
+  data_fetch_sample_rate: 0.1
+
+feature_flags:
+  refresh_interval_seconds: 15   # faster refresh in prod
+
+database:
+  pool_min: 10
+  pool_max: 30
+
+risk:
+  # Tighter limits in production
+  tier1_daily_drawdown_pct: 0.05
+  tier2_daily_drawdown_pct: 0.08
+  tier3_daily_drawdown_pct: 0.12
