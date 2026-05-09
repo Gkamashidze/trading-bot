@@ -22,6 +22,7 @@ Stage 0: no WebSocket, no strategies, no live trading.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 
 import uvicorn
@@ -43,8 +44,13 @@ from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutd
 log = get_logger(__name__)
 
 
-async def _run_dashboard(port: int = 8000) -> None:
-    """Run uvicorn serving the FastAPI dashboard as a background task."""
+async def _run_dashboard() -> None:
+    """Run uvicorn serving the FastAPI dashboard as a background task.
+
+    Port is read from PORT env var (Railway injects this automatically).
+    Falls back to 8000 for local development.
+    """
+    port = int(os.environ.get("PORT", "8000"))
     app = create_app()
     config = uvicorn.Config(
         app,
@@ -54,6 +60,7 @@ async def _run_dashboard(port: int = 8000) -> None:
         access_log=False,
     )
     server = uvicorn.Server(config)
+    log.info("dashboard_started", port=port, path="/")
     await server.serve()
 
 
@@ -176,7 +183,7 @@ async def main_async() -> None:
         scheduler, pool, alerter = await _startup()
         # Run dashboard server and shutdown-waiter concurrently
         await asyncio.gather(
-            _run_dashboard(port=8000),
+            _run_dashboard(),
             wait_for_shutdown(),
             return_exceptions=True,
         )
