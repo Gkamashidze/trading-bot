@@ -61,9 +61,7 @@ class TelegramAlerter:
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
         if not token or not chat_id:
-            raise ValueError(
-                "TELEGRAM_BOT_TOKEN and TELEGRAM_ALERT_CHAT_ID must be set"
-            )
+            raise ValueError("TELEGRAM_BOT_TOKEN and TELEGRAM_ALERT_CHAT_ID must be set")
         return cls(token=token, chat_id=chat_id)
 
     @classmethod

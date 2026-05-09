@@ -56,9 +56,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request=request, name="index.html"
-        )
+        return templates.TemplateResponse(request=request, name="index.html")
 
     @app.get("/partials/status", response_class=HTMLResponse)
     async def partial_status(request: Request) -> HTMLResponse:

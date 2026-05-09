@@ -30,7 +30,7 @@ if not database_url:
 
 # Normalise to asyncpg scheme — Railway may provide postgres:// or postgresql://
 if database_url.startswith("postgres://"):
-    database_url = "postgresql+asyncpg://" + database_url[len("postgres://"):]
+    database_url = "postgresql+asyncpg://" + database_url[len("postgres://") :]
 elif database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
