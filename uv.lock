@@ -1307,6 +1307,15 @@ wheels = [
 ]
 
 [[package]]
+name = "gibberish-detector"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/24/a5c518032bdb704128ee96f26ac20d9bc60ac32bb71bf3af0424ab287ac1/gibberish_detector-0.1.1.tar.gz", hash = "sha256:26264782f6d16f90ef03b209e255ec50ef6de6d258404b4b4cd468ebc069758c", size = 6564, upload-time = "2021-03-04T15:05:58.968Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3a/70/2ba30513075aac4df46849a086037ce36e1e7ca1f87f84840c8bc40825e6/gibberish_detector-0.1.1-py3-none-any.whl", hash = "sha256:520dd48533c4bd30b2a6051c26131369d946c147288c5f7fce4e125a0e5d341d", size = 10966, upload-time = "2021-03-04T15:05:57.826Z" },
+]
+
+[[package]]
 name = "googleapis-common-protos"
 version = "1.75.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4916,6 +4925,7 @@ dev = [
     { name = "bandit" },
     { name = "commitizen" },
     { name = "detect-secrets" },
+    { name = "gibberish-detector" },
     { name = "hypothesis" },
     { name = "memray" },
     { name = "mutmut" },
@@ -4952,6 +4962,7 @@ requires-dist = [
     { name = "commitizen", marker = "extra == 'dev'", specifier = ">=3.27.0" },
     { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "duckdb", specifier = ">=0.10.3" },
+    { name = "gibberish-detector", marker = "extra == 'dev'", specifier = ">=0.1.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.103.0" },
     { name = "jupyter", marker = "extra == 'research'", specifier = ">=1.0.0" },

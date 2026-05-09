@@ -80,6 +80,7 @@ dev = [
 
     # ── Security scanning ─────────────────────────────────────────────────
     "detect-secrets>=1.5.0",
+    "gibberish-detector>=0.1.1",  # required by detect-secrets gibberish filter
     "pip-audit>=2.7.3",
     "bandit>=1.7.9",
 
