@@ -89,3 +89,5 @@ Thumbs.db
 
 # ── detect-secrets baseline ───────────────────────────────────────────────────
 # Keep .secrets.baseline in git (it's a whitelist of known-false-positives)
+trading_bot/data 2/
+.claude/scheduled_tasks.lock
