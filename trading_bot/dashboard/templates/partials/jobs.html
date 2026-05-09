@@ -1,0 +1,27 @@
+<!-- Scheduler Jobs — ავტომატური სამუშაოების სია -->
+<div class="bg-gray-900 border border-gray-800 rounded-lg p-4 h-full">
+  <h2 class="text-sm font-semibold text-gray-300 mb-3">
+    Scheduled Jobs
+    <span class="text-xs text-gray-600 font-normal ml-1">(დაგეგმილი სამუშაოები)</span>
+  </h2>
+
+  {% if jobs %}
+    <ul class="space-y-3">
+      {% for job in jobs %}
+      <li class="text-xs border-l-2 border-blue-800 pl-3">
+        <p class="text-gray-200 font-semibold">{{ job.name }}</p>
+        <p class="text-gray-500 font-mono">{{ job.id }}</p>
+        <p class="text-gray-400 mt-0.5">
+          შემდეგი გაშვება:
+          <span class="text-blue-300">{{ job.next_run }}</span>
+        </p>
+        <p class="text-gray-600">Trigger: {{ job.trigger }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="text-xs text-gray-600">
+      {% if scheduler_off %}Scheduler გაჩერებულია{% else %}სამუშაოები არ არის{% endif %}
+    </p>
+  {% endif %}
+</div>

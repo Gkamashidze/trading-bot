@@ -40,6 +40,11 @@ dependencies = [
     "alembic>=1.13.1",
     "sqlalchemy>=2.0.30",       # alembic dependency + ORM-free typing
 
+    # ── Dashboard & HTTP ──────────────────────────────────────────────────
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "jinja2>=3.1.4",
+
     # ── Scheduling ────────────────────────────────────────────────────────
     "apscheduler>=3.10.4",
 
@@ -202,8 +207,10 @@ omit = [
     "trading_bot/notebooks/*",
     "tests/*",
     "scripts/*",
-    # Infrastructure requiring live DB/exchange — covered by integration tests, not unit tests
+    # Infrastructure requiring live DB/exchange/HTTP — covered by integration tests
     "trading_bot/main.py",
+    "trading_bot/health.py",
+    "trading_bot/dashboard/*",
     "trading_bot/database/connection.py",
     "trading_bot/observability/metrics.py",
     "trading_bot/observability/tracing.py",

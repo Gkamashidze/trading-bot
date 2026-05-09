@@ -1,0 +1,44 @@
+<!-- სისტემის სტატუსი — ყოველ 10 წამში განახლდება htmx-ით -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+
+  <!-- DB კავშირი -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+    <p class="text-xs text-gray-500 mb-1">მონაცემთა ბაზა</p>
+    <p class="text-sm font-semibold">
+      {% if db_connected %}
+        <span class="text-green-400">&#9679; დაკავშირებული</span>
+      {% else %}
+        <span class="text-red-400">&#9679; გათიშული</span>
+      {% endif %}
+    </p>
+    <p class="text-xs text-gray-600 mt-1">PostgreSQL</p>
+  </div>
+
+  <!-- Scheduler — ავტომატური სამუშაოების გამშვები -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+    <p class="text-xs text-gray-500 mb-1">Scheduler (ავტო-გამშვები)</p>
+    <p class="text-sm font-semibold">
+      {% if scheduler_running %}
+        <span class="text-green-400">&#9679; გაშვებული</span>
+      {% else %}
+        <span class="text-yellow-400">&#9679; გაჩერებული</span>
+      {% endif %}
+    </p>
+    <p class="text-xs text-gray-600 mt-1">APScheduler</p>
+  </div>
+
+  <!-- Uptime — სერვისის გამართული მუშაობის დრო -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+    <p class="text-xs text-gray-500 mb-1">Uptime (მუშაობის დრო)</p>
+    <p class="text-sm font-semibold text-white font-mono">{{ uptime }}</p>
+    <p class="text-xs text-gray-600 mt-1">სს:წთ:წმ</p>
+  </div>
+
+  <!-- Stage — სისტემის განვითარების ეტაპი -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+    <p class="text-xs text-gray-500 mb-1">Stage (ეტაპი)</p>
+    <p class="text-sm font-semibold text-white">{{ stage }} — Infrastructure</p>
+    <p class="text-xs text-gray-600 mt-1">ვაჭრობა: Stage 5+</p>
+  </div>
+
+</div>

@@ -4,20 +4,19 @@ Startup sequence:
 1. Load configuration (YAML + env vars)
 2. Configure logging (structlog, JSON/console)
 3. Configure tracing (OpenTelemetry)
-4. Start health check HTTP server (port 8000) — Railway healthcheck
+4. Start FastAPI dashboard + /health server (uvicorn, port 8000)
 5. Start Prometheus metrics server
 6. Init DB connection pool
-7. Run Alembic migrations (safe — idempotent)
-8. Init idempotency store + feature flag store
-9. Register OS signal handlers (SIGTERM → graceful shutdown)
-10. Register APScheduler jobs
-11. Start scheduler
+7. Init idempotency store + feature flag store
+8. Register OS signal handlers (SIGTERM -> graceful shutdown)
+9. Register APScheduler jobs
+10. Start scheduler
+11. Send Telegram startup alert
 12. Log startup diagnostics
 13. Wait for shutdown signal
 14. Graceful shutdown (drain queues, close connections, exit 0)
 
 Stage 0: no WebSocket, no strategies, no live trading.
-Only data ingestion scheduler and health check are active.
 """
 
 from __future__ import annotations
@@ -25,14 +24,14 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from aiohttp.web import AppRunner
+import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from trading_bot.alerts.telegram import TelegramAlerter
 from trading_bot.config import get_settings
+from trading_bot.dashboard.app import create_app, init_dashboard
 from trading_bot.database.connection import close_pool, init_pool
 from trading_bot.feature_flags.store import FeatureFlagStore, set_default_store
-from trading_bot.health import start_health_server, stop_health_server, update_health_state
 from trading_bot.idempotency.decorator import set_default_store as set_idem_store
 from trading_bot.idempotency.store import PostgresIdempotencyStore
 from trading_bot.observability.logging import configure_logging, get_logger
@@ -44,8 +43,22 @@ from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutd
 log = get_logger(__name__)
 
 
-async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner, TelegramAlerter | None]:
-    """Perform all startup tasks. Returns (scheduler, pool, health_runner, alerter)."""
+async def _run_dashboard(port: int = 8000) -> None:
+    """Run uvicorn serving the FastAPI dashboard as a background task."""
+    app = create_app()
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",  # noqa: S104
+        port=port,
+        log_level="warning",  # uvicorn logs go through structlog instead
+        access_log=False,
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def _startup() -> tuple[AsyncIOScheduler | None, object, TelegramAlerter | None]:
+    """Perform all startup tasks. Returns (scheduler, pool, alerter)."""
     settings = get_settings()
 
     # ── Logging ──────────────────────────────────────────────────────────
@@ -64,10 +77,6 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner, Telegr
         data_fetch_sample_rate=settings.otel.data_fetch_sample_rate,
     )
 
-    # ── Health Check Server ───────────────────────────────────────────────
-    health_runner = await start_health_server(port=8000)
-    update_health_state(environment=settings.environment, stage="0")
-
     # ── Prometheus ────────────────────────────────────────────────────────
     if settings.prometheus.enabled:
         start_metrics_server(port=settings.prometheus.port)
@@ -81,7 +90,6 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner, Telegr
             max_size=settings.database.pool_max,
             command_timeout=float(settings.database.command_timeout),
         )
-        update_health_state(db_connected=True)
 
         # Feature flags
         flag_store = FeatureFlagStore(pool)
@@ -108,10 +116,12 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner, Telegr
         scheduler = create_scheduler(database_url=settings.database.url)
         register_default_jobs(scheduler)
         scheduler.start()
-        update_health_state(scheduler_running=True)
         log.info("scheduler_started")
     else:
         log.warning("scheduler_skipped", reason="DATABASE_URL not configured")
+
+    # ── Dashboard wiring (pool + scheduler available now) ─────────────────
+    init_dashboard(pool=pool, scheduler=scheduler)
 
     # ── Telegram Alerter ─────────────────────────────────────────────────
     alerter = TelegramAlerter.from_env_optional()
@@ -131,15 +141,15 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner, Telegr
         stage="0",
         live_trading="DISABLED",
         binance_testnet=settings.binance.testnet,
+        dashboard_url="http://0.0.0.0:8000",
     )
 
-    return scheduler, pool, health_runner, alerter
+    return scheduler, pool, alerter
 
 
 async def _shutdown(
     scheduler: AsyncIOScheduler | None,
     pool: object,
-    health_runner: AppRunner | None,
     alerter: TelegramAlerter | None,
 ) -> None:
     """Graceful shutdown — drain, close, exit."""
@@ -155,25 +165,26 @@ async def _shutdown(
     if pool is not None:
         await close_pool()
 
-    if health_runner is not None:
-        await stop_health_server(health_runner)
-
     log.info("trading_bot_stopped")
 
 
 async def main_async() -> None:
     scheduler = None
     pool = None
-    health_runner = None
     alerter = None
     try:
-        scheduler, pool, health_runner, alerter = await _startup()
-        await wait_for_shutdown()
+        scheduler, pool, alerter = await _startup()
+        # Run dashboard server and shutdown-waiter concurrently
+        await asyncio.gather(
+            _run_dashboard(port=8000),
+            wait_for_shutdown(),
+            return_exceptions=True,
+        )
     except Exception as e:
         log.error("startup_failed", error=str(e), exc_info=True)
         sys.exit(1)
     finally:
-        await _shutdown(scheduler, pool, health_runner, alerter)
+        await _shutdown(scheduler, pool, alerter)
 
 
 def main() -> None:
