@@ -69,11 +69,10 @@ Breaking changes: append `!` after scope: `feat(core)!: rename OHLCVBar fields`
 
 ## Development Workflow
 
-1. Feature branch: `git checkout -b feat/your-feature`
-2. Work on the branch (this session or VS Code+Claude)
-3. Pre-commit checks must pass
-4. Push → PR → review → merge to main
-5. Sync: `git fetch origin && git pull origin main` before starting new work
+1. Work directly on `main` — no branch required
+2. Pre-commit checks must pass before committing
+3. Push directly: `git push origin main`
+4. Sync before starting new work: `git fetch origin && git pull --ff-only origin main`
 
 ## Key Constraints
 
