@@ -94,14 +94,19 @@ def test_fractional_kelly_never_exceeds_quarter(
 
 
 def compute_daily_drawdown(equity: list[float]) -> float:
-    """Daily drawdown from peak: (current - peak) / peak."""
+    """Worst drawdown from running peak: min((value - peak) / peak) over all points."""
     if not equity:
         return 0.0
     peak = equity[0]
-    current = equity[-1]
-    if peak <= 0:
-        return 0.0
-    return (current - peak) / peak
+    min_dd = 0.0
+    for value in equity:
+        if value > peak:
+            peak = value
+        if peak > 0:
+            dd = (value - peak) / peak
+            if dd < min_dd:
+                min_dd = dd
+    return min_dd
 
 
 @given(
