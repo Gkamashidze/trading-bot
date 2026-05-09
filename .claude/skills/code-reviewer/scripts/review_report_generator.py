@@ -4,12 +4,10 @@ Review Report Generator
 Automated tool for code reviewer tasks
 """
 
-import os
-import sys
-import json
 import argparse
+import json
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 
 class ReviewReportGenerator:
@@ -20,7 +18,7 @@ class ReviewReportGenerator:
         self.verbose = verbose
         self.results = {}
 
-    def run(self) -> Dict:
+    def run(self) -> dict:
         """Execute the main functionality"""
         print(f"🚀 Running {self.__class__.__name__}...")
         print(f"📁 Target: {self.target_path}")

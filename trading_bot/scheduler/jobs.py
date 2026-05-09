@@ -17,8 +17,7 @@ Usage:
 
 from __future__ import annotations
 
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -91,7 +90,7 @@ async def daily_ohlcv_ingestion_job(
         timeframe=timeframe,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     end = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = end - timedelta(days=2)  # 2-day window to catch gaps
 

@@ -165,8 +165,8 @@ async def _check_exchange() -> list[CheckResult]:
     results = []
     try:
         from trading_bot.config import get_settings
-        from trading_bot.exchange import get_exchange
         from trading_bot.core.models import ExchangeId
+        from trading_bot.exchange import get_exchange
 
         settings = get_settings()
         exchange = get_exchange(ExchangeId.BINANCE)

@@ -8,7 +8,7 @@ Available fixtures:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -23,7 +23,7 @@ def sample_ohlcv_bars() -> list[OHLCVBar]:
     """100 synthetic BTC/USDT daily bars for testing."""
     bars = []
     base_price = Decimal("50000")
-    base_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
 
     for i in range(100):
         open_price = base_price + Decimal(str(i * 100))
@@ -79,7 +79,7 @@ def mock_exchange() -> AsyncMock:
 
     mock = AsyncMock(spec=ExchangeInterface)
     mock.health_check.return_value = True
-    mock.get_server_time.return_value = datetime.now(timezone.utc)
+    mock.get_server_time.return_value = datetime.now(UTC)
     return mock
 
 

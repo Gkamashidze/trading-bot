@@ -16,8 +16,7 @@ Usage:
         ...
 """
 
-from trading_bot.feature_flags.store import FeatureFlagStore
 from trading_bot.feature_flags.decorator import feature_required
-from trading_bot.feature_flags.store import is_enabled
+from trading_bot.feature_flags.store import FeatureFlagStore, is_enabled
 
 __all__ = ["FeatureFlagStore", "feature_required", "is_enabled"]

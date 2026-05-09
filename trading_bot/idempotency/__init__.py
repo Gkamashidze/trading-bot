@@ -15,8 +15,8 @@ Usage:
         ...
 """
 
-from trading_bot.idempotency.keys import generate_idempotency_key
 from trading_bot.idempotency.decorator import idempotent
+from trading_bot.idempotency.keys import generate_idempotency_key
 from trading_bot.idempotency.store import PostgresIdempotencyStore
 
-__all__ = ["generate_idempotency_key", "idempotent", "PostgresIdempotencyStore"]
+__all__ = ["PostgresIdempotencyStore", "generate_idempotency_key", "idempotent"]

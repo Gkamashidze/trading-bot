@@ -9,7 +9,7 @@ If Yahoo blocks access, migrate to Polygon.io or Tiingo (see vendor risk ADR).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -63,7 +63,7 @@ class YFinanceProvider(DataProviderInterface):
 
                 results = []
                 for ts, row in df.iterrows():
-                    open_time = ts.to_pydatetime().replace(tzinfo=timezone.utc)
+                    open_time = ts.to_pydatetime().replace(tzinfo=UTC)
                     results.append(
                         {
                             "open_time": open_time,
@@ -103,7 +103,7 @@ class YFinanceProvider(DataProviderInterface):
         for ts, row in filtered.iterrows():
             results.append(
                 {
-                    "date": ts.to_pydatetime().replace(tzinfo=timezone.utc),
+                    "date": ts.to_pydatetime().replace(tzinfo=UTC),
                     "dividend": Decimal(str(row.get("Dividends", 0))),
                     "split_ratio": Decimal(str(row.get("Stock Splits", 1))),
                 }

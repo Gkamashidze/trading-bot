@@ -25,7 +25,6 @@ import yaml
 from cachetools import TTLCache
 
 from trading_bot.core.contracts import FeatureFlagStoreInterface
-from trading_bot.core.exceptions import FeatureDisabledError
 from trading_bot.observability.logging import get_logger
 from trading_bot.observability.metrics import FEATURE_FLAG_EVALUATIONS
 
@@ -43,10 +42,10 @@ if _yaml_path.exists():
 _SAFETY_CRITICAL = {"live_trading_enabled", "canary_trade_enabled"}
 
 # Module-level singleton store reference (set by main.py after pool creation)
-_default_store: "FeatureFlagStore | None" = None
+_default_store: FeatureFlagStore | None = None
 
 
-def set_default_store(store: "FeatureFlagStore") -> None:
+def set_default_store(store: FeatureFlagStore) -> None:
     global _default_store
     _default_store = store
 

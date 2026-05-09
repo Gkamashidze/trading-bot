@@ -16,7 +16,6 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
-    Summary,
     start_http_server,
 )
 

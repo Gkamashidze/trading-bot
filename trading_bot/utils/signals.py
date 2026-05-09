@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import signal
-import sys
-from typing import NoReturn
 
 from trading_bot.observability.logging import get_logger
 
