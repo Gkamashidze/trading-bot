@@ -58,9 +58,7 @@ def _inject_context_vars(
     return event_dict
 
 
-def _inject_runbook(
-    logger: Any, method_name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
+def _inject_runbook(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Structlog processor: embed runbook URL in error/critical logs."""
     if method_name in ("error", "critical", "exception"):
         if "runbook_url" not in event_dict:
@@ -92,13 +90,15 @@ def configure_logging(
     ]
 
     if include_caller:
-        shared_processors.append(structlog.processors.CallsiteParameterAdder(
-            [
-                structlog.processors.CallsiteParameter.FILENAME,
-                structlog.processors.CallsiteParameter.FUNC_NAME,
-                structlog.processors.CallsiteParameter.LINENO,
-            ]
-        ))
+        shared_processors.append(
+            structlog.processors.CallsiteParameterAdder(
+                [
+                    structlog.processors.CallsiteParameter.FILENAME,
+                    structlog.processors.CallsiteParameter.FUNC_NAME,
+                    structlog.processors.CallsiteParameter.LINENO,
+                ]
+            )
+        )
 
     if fmt == "json":
         renderer: Any = structlog.processors.JSONRenderer()

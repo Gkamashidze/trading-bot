@@ -243,7 +243,7 @@ async def run_verification() -> VerificationReport:
     for r in await _check_exchange():
         report.add(r)
 
-    print(f"\n{'='*48}")
+    print(f"\n{'=' * 48}")
     if report.passed:
         print("✓ All critical checks passed. System is ready.")
     else:

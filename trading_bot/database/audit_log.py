@@ -136,7 +136,9 @@ class PostgresAuditLog(AuditLogInterface):
 
         expected_prev: str | None = None
         for row in rows:
-            payload_bytes = row["payload"].encode() if isinstance(row["payload"], str) else row["payload"]
+            payload_bytes = (
+                row["payload"].encode() if isinstance(row["payload"], str) else row["payload"]
+            )
             recomputed = _compute_hash(row["prev_event_hash"], payload_bytes)
             if recomputed != row["event_hash"]:
                 log.error(

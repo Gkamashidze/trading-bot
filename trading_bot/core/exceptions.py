@@ -10,7 +10,9 @@ from __future__ import annotations
 class TradingBotError(Exception):
     """Base exception for all trading-bot errors."""
 
-    runbook_url: str = "https://github.com/Gkamashidze/trading-bot/tree/main/trading_bot/docs/runbooks"
+    runbook_url: str = (
+        "https://github.com/Gkamashidze/trading-bot/tree/main/trading_bot/docs/runbooks"
+    )
 
     def __init__(self, message: str, runbook_url: str | None = None) -> None:
         super().__init__(message)

@@ -212,8 +212,7 @@ class Settings(BaseSettings):
         def _redact(obj: Any) -> Any:
             if isinstance(obj, dict):
                 return {
-                    k: "[REDACTED]" if k in _redact_keys else _redact(v)
-                    for k, v in obj.items()
+                    k: "[REDACTED]" if k in _redact_keys else _redact(v) for k, v in obj.items()
                 }
             return obj
 

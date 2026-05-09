@@ -48,9 +48,9 @@ def create_scheduler(database_url: str) -> AsyncIOScheduler:
         "default": AsyncIOExecutor(),
     }
     job_defaults = {
-        "coalesce": True,          # collapse missed runs into one
-        "max_instances": 1,        # never run the same job concurrently
-        "misfire_grace_time": 300, # allow jobs to fire up to 5 min late
+        "coalesce": True,  # collapse missed runs into one
+        "max_instances": 1,  # never run the same job concurrently
+        "misfire_grace_time": 300,  # allow jobs to fire up to 5 min late
     }
 
     scheduler = AsyncIOScheduler(

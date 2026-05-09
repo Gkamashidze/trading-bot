@@ -89,9 +89,7 @@ class PostgresIdempotencyStore(IdempotencyStoreInterface):
     async def cleanup_expired(self) -> int:
         """Delete expired keys. Should be called by a scheduled job daily."""
         async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                "DELETE FROM idempotency_keys WHERE expires_at < NOW()"
-            )
+            result = await conn.execute("DELETE FROM idempotency_keys WHERE expires_at < NOW()")
         deleted = int(result.split()[-1])
         log.info("idempotency_keys_cleaned", deleted=deleted)
         return deleted

@@ -103,7 +103,7 @@ class RiskEvent(_BaseEvent):
     accepted: bool
     reason: str
     drawdown_pct: float
-    tier: int | None = None          # which circuit breaker tier, if triggered
+    tier: int | None = None  # which circuit breaker tier, if triggered
 
 
 class DrawdownBreachEvent(_BaseEvent):
@@ -112,7 +112,7 @@ class DrawdownBreachEvent(_BaseEvent):
     event_type: str = "risk.drawdown_breach"
     tier: int
     drawdown_pct: float
-    action: str                       # "pause_new" | "full_halt" | "emergency_liquidate"
+    action: str  # "pause_new" | "full_halt" | "emergency_liquidate"
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ class SystemEvent(_BaseEvent):
     """System lifecycle event (startup, shutdown, restart)."""
 
     event_type: str = "system.lifecycle"
-    action: str                       # "startup" | "shutdown" | "restart"
+    action: str  # "startup" | "shutdown" | "restart"
     component: str
     message: str = ""
 
@@ -208,7 +208,7 @@ class AlertEvent(_BaseEvent):
     """An alert was triggered (kill switch, drawdown, anomaly)."""
 
     event_type: str = "system.alert"
-    severity: str                     # "info" | "warning" | "critical" | "emergency"
+    severity: str  # "info" | "warning" | "critical" | "emergency"
     title: str
     message: str
     runbook_url: str = ""

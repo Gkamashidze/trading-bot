@@ -50,10 +50,10 @@ class OrderStatus(StrEnum):
 
 
 class TimeInForce(StrEnum):
-    GTC = "gtc"   # good-till-cancelled
-    IOC = "ioc"   # immediate-or-cancel
-    FOK = "fok"   # fill-or-kill
-    DAY = "day"   # day order
+    GTC = "gtc"  # good-till-cancelled
+    IOC = "ioc"  # immediate-or-cancel
+    FOK = "fok"  # fill-or-kill
+    DAY = "day"  # day order
 
 
 class ExchangeId(StrEnum):
@@ -98,7 +98,7 @@ class OHLCVBar(BaseModel):
 
     symbol: str
     exchange: ExchangeId
-    timeframe: str          # e.g. "1h", "1d"
+    timeframe: str  # e.g. "1h", "1d"
     open_time: datetime
     close_time: datetime
     open: Decimal
@@ -243,7 +243,7 @@ class Position(BaseModel):
     symbol: str
     exchange: ExchangeId
     asset_class: AssetClass
-    quantity: Decimal       # positive = long, negative = short (future)
+    quantity: Decimal  # positive = long, negative = short (future)
     average_cost: Decimal
     current_price: Decimal
     opened_at: datetime
@@ -304,7 +304,7 @@ class Signal(BaseModel):
     side: OrderSide
     strength: float = Field(ge=0.0, le=1.0)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    hypothesis: str = ""     # why this signal was emitted (audit trail)
+    hypothesis: str = ""  # why this signal was emitted (audit trail)
     correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
 
@@ -319,12 +319,12 @@ class DataLineage(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    source: str              # e.g. "binance.fetch_ohlcv"
+    source: str  # e.g. "binance.fetch_ohlcv"
     fetched_at: datetime
     processed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     validator_version: str = "1.0"
     schema_version: str = "1.0"
     row_count: int
-    checksum: str = ""       # sha256 of raw bytes before processing
+    checksum: str = ""  # sha256 of raw bytes before processing
     quarantined: bool = False
     quarantine_reason: str | None = None

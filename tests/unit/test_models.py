@@ -70,11 +70,7 @@ class TestOHLCVBar:
 
     def test_close_time_before_open_time_rejected(self) -> None:
         with pytest.raises(ValueError, match="close_time"):
-            OHLCVBar(
-                **self._valid_bar(
-                    close_time=datetime(2023, 12, 31, tzinfo=timezone.utc)
-                )
-            )
+            OHLCVBar(**self._valid_bar(close_time=datetime(2023, 12, 31, tzinfo=timezone.utc)))
 
 
 class TestOrderRequest:

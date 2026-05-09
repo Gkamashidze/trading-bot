@@ -23,8 +23,7 @@ if config.config_file_name is not None:
 database_url = os.environ.get("DATABASE_URL", "")
 if not database_url:
     raise RuntimeError(
-        "DATABASE_URL environment variable is not set. "
-        "Set it before running alembic commands."
+        "DATABASE_URL environment variable is not set. Set it before running alembic commands."
     )
 
 # asyncpg URL → synchronous URL for Alembic (Alembic uses sync SQLAlchemy)

@@ -48,8 +48,8 @@ class YFinanceProvider(DataProviderInterface):
                     start=start.date().isoformat(),
                     end=end.date().isoformat(),
                     interval=_map_timeframe(timeframe),
-                    auto_adjust=True,     # applies splits/dividends
-                    prepost=False,        # regular session only
+                    auto_adjust=True,  # applies splits/dividends
+                    prepost=False,  # regular session only
                 )
 
                 if df.empty:

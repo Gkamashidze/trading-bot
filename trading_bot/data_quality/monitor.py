@@ -142,15 +142,11 @@ class DataQualityMonitor:
                 symbol=symbol,
                 anomaly_type="negative_price",
             ).inc()
-            raise DataAnomalyError(
-                f"Tick anomaly: price={price} <= 0 for {exchange}/{symbol}"
-            )
+            raise DataAnomalyError(f"Tick anomaly: price={price} <= 0 for {exchange}/{symbol}")
         if volume < 0:
             DATA_ANOMALIES_DETECTED.labels(
                 exchange=exchange,
                 symbol=symbol,
                 anomaly_type="negative_volume",
             ).inc()
-            raise DataAnomalyError(
-                f"Tick anomaly: volume={volume} < 0 for {exchange}/{symbol}"
-            )
+            raise DataAnomalyError(f"Tick anomaly: volume={volume} < 0 for {exchange}/{symbol}")

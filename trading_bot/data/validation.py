@@ -48,8 +48,8 @@ class OHLCVSchema(pa.DataFrameModel):
     volume: Series[float] = Field(ge=0.0, nullable=False)
 
     class Config:
-        strict = False          # allow extra columns (symbol, exchange, etc.)
-        coerce = True           # cast Decimal → float at validation time
+        strict = False  # allow extra columns (symbol, exchange, etc.)
+        coerce = True  # cast Decimal → float at validation time
         ordered = False
 
     @pa.dataframe_check
@@ -58,15 +58,11 @@ class OHLCVSchema(pa.DataFrameModel):
 
     @pa.dataframe_check
     def open_within_range(cls, df: pd.DataFrame) -> bool:
-        return bool(
-            ((df["open"] >= df["low"]) & (df["open"] <= df["high"])).all()
-        )
+        return bool(((df["open"] >= df["low"]) & (df["open"] <= df["high"])).all())
 
     @pa.dataframe_check
     def close_within_range(cls, df: pd.DataFrame) -> bool:
-        return bool(
-            ((df["close"] >= df["low"]) & (df["close"] <= df["high"])).all()
-        )
+        return bool(((df["close"] >= df["low"]) & (df["close"] <= df["high"])).all())
 
 
 def validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
@@ -80,7 +76,9 @@ def validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         log.debug("ohlcv_validation_passed", rows=len(df))
         return validated  # type: ignore[return-value]
     except pa.errors.SchemaErrors as e:
-        failure_cases = e.failure_cases.to_dict(orient="records") if hasattr(e, "failure_cases") else []
+        failure_cases = (
+            e.failure_cases.to_dict(orient="records") if hasattr(e, "failure_cases") else []
+        )
         log.error(
             "ohlcv_validation_failed",
             failure_count=len(failure_cases),
