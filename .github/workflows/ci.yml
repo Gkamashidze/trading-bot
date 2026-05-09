@@ -108,7 +108,7 @@ jobs:
 
       - name: Validate YAML configs
         run: |
-          python -c "
+          uv run python -c "
           import yaml
           from pathlib import Path
           config_dir = Path('trading_bot/config')
