@@ -23,9 +23,8 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy source
+# Copy source (config lives inside trading_bot/config/ — no separate copy needed)
 COPY trading_bot/ ./trading_bot/
-COPY config/ ./config/ 2>/dev/null || true
 
 # Activate venv by prepending to PATH
 ENV PATH="/app/.venv/bin:$PATH"
