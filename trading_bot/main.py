@@ -28,6 +28,7 @@ import sys
 from aiohttp.web import AppRunner
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from trading_bot.alerts.telegram import TelegramAlerter
 from trading_bot.config import get_settings
 from trading_bot.database.connection import close_pool, init_pool
 from trading_bot.feature_flags.store import FeatureFlagStore, set_default_store
@@ -43,8 +44,8 @@ from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutd
 log = get_logger(__name__)
 
 
-async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner]:
-    """Perform all startup tasks. Returns (scheduler, pool, health_runner)."""
+async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner, TelegramAlerter | None]:
+    """Perform all startup tasks. Returns (scheduler, pool, health_runner, alerter)."""
     settings = get_settings()
 
     # ── Logging ──────────────────────────────────────────────────────────
@@ -112,6 +113,16 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner]:
     else:
         log.warning("scheduler_skipped", reason="DATABASE_URL not configured")
 
+    # ── Telegram Alerter ─────────────────────────────────────────────────
+    alerter = TelegramAlerter.from_env_optional()
+    if alerter is None:
+        log.warning(
+            "telegram_not_configured",
+            note="Set TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID",
+        )
+    else:
+        await alerter.send_startup(environment=settings.environment, stage="0")
+
     # ── Startup Diagnostics ───────────────────────────────────────────────
     log.info(
         "trading_bot_started",
@@ -122,16 +133,20 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, AppRunner]:
         binance_testnet=settings.binance.testnet,
     )
 
-    return scheduler, pool, health_runner
+    return scheduler, pool, health_runner, alerter
 
 
 async def _shutdown(
     scheduler: AsyncIOScheduler | None,
     pool: object,
     health_runner: AppRunner | None,
+    alerter: TelegramAlerter | None,
 ) -> None:
     """Graceful shutdown — drain, close, exit."""
     log.info("graceful_shutdown_initiated")
+
+    if alerter is not None:
+        await alerter.send_shutdown()
 
     if scheduler is not None:
         scheduler.shutdown(wait=True)
@@ -150,14 +165,15 @@ async def main_async() -> None:
     scheduler = None
     pool = None
     health_runner = None
+    alerter = None
     try:
-        scheduler, pool, health_runner = await _startup()
+        scheduler, pool, health_runner, alerter = await _startup()
         await wait_for_shutdown()
     except Exception as e:
         log.error("startup_failed", error=str(e), exc_info=True)
         sys.exit(1)
     finally:
-        await _shutdown(scheduler, pool, health_runner)
+        await _shutdown(scheduler, pool, health_runner, alerter)
 
 
 def main() -> None:
