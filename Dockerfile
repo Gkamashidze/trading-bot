@@ -6,8 +6,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy lockfile + project manifest first (layer cache)
-COPY pyproject.toml uv.lock ./
+# Copy lockfile + project manifest + alembic config first (layer cache)
+COPY pyproject.toml uv.lock alembic.ini ./
 
 # Install production deps only (no dev extras)
 RUN uv sync --frozen --no-dev --no-install-project
@@ -23,11 +23,13 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy source (config lives inside trading_bot/config/ — no separate copy needed)
+# Copy source + alembic config
 COPY trading_bot/ ./trading_bot/
+COPY --from=builder /app/alembic.ini ./
 
-# Activate venv by prepending to PATH
+# Activate venv; PYTHONPATH ensures trading_bot is importable from /app
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
