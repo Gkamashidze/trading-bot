@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import pandas as pd
 import pandera as pa
-import pandera.typing as pat
 from pandera import Field
-from pandera.typing import DateTime, Series
+from pandera.typing import Series
 
 from trading_bot.core.exceptions import DataValidationError
 from trading_bot.observability.logging import get_logger
@@ -53,15 +52,15 @@ class OHLCVSchema(pa.DataFrameModel):
         ordered = False
 
     @pa.dataframe_check
-    def high_ge_low(cls, df: pd.DataFrame) -> bool:
+    def high_ge_low(self, df: pd.DataFrame) -> bool:  # type: ignore[misc]
         return bool((df["high"] >= df["low"]).all())
 
     @pa.dataframe_check
-    def open_within_range(cls, df: pd.DataFrame) -> bool:
+    def open_within_range(self, df: pd.DataFrame) -> bool:  # type: ignore[misc]
         return bool(((df["open"] >= df["low"]) & (df["open"] <= df["high"])).all())
 
     @pa.dataframe_check
-    def close_within_range(cls, df: pd.DataFrame) -> bool:
+    def close_within_range(self, df: pd.DataFrame) -> bool:  # type: ignore[misc]
         return bool(((df["close"] >= df["low"]) & (df["close"] <= df["high"])).all())
 
 
@@ -74,7 +73,7 @@ def validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     try:
         validated = OHLCVSchema.validate(df, lazy=True)
         log.debug("ohlcv_validation_passed", rows=len(df))
-        return validated  # type: ignore[return-value]
+        return validated
     except pa.errors.SchemaErrors as e:
         failure_cases = (
             e.failure_cases.to_dict(orient="records") if hasattr(e, "failure_cases") else []

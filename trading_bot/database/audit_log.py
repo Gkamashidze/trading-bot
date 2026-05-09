@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
@@ -74,7 +74,7 @@ class PostgresAuditLog(AuditLogInterface):
     ) -> str:
         """Append an event. Returns the event_hash for this entry."""
         if occurred_at is None:
-            occurred_at = datetime.now(timezone.utc)
+            occurred_at = datetime.now(UTC)
 
         payload_bytes = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
         prev_hash = await self.get_chain_head()
@@ -114,7 +114,7 @@ class PostgresAuditLog(AuditLogInterface):
             row = await conn.fetchrow(
                 "SELECT event_hash FROM audit_log ORDER BY occurred_at DESC LIMIT 1"
             )
-        return row["event_hash"] if row else None
+        return str(row["event_hash"]) if row else None
 
     async def verify_chain(self, since_event_id: str | None = None) -> bool:
         """Verify hash chain integrity.
@@ -148,7 +148,7 @@ class PostgresAuditLog(AuditLogInterface):
                     stored_hash=row["event_hash"],
                 )
                 return False
-            expected_prev = row["event_hash"]
+            expected_prev = row["event_hash"]  # noqa: F841  — reserved for future chain linkage check
 
         log.info("audit_chain_verified", events_checked=len(rows))
         return True

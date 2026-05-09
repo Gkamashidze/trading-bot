@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from trading_bot.core.exceptions import ClockDriftError
@@ -32,7 +32,7 @@ log = get_logger(__name__)
 
 def utc_now() -> datetime:
     """Return current UTC time. Use this instead of datetime.now() everywhere."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def utc_timestamp_ms() -> int:
@@ -47,7 +47,7 @@ def assert_utc_aware(dt: datetime, field_name: str = "datetime") -> datetime:
             f"Naive datetime rejected in '{field_name}'. "
             "Use datetime.now(timezone.utc) or pandas Timestamp with tz='UTC'."
         )
-    return dt.astimezone(timezone.utc)
+    return dt.astimezone(UTC)
 
 
 class TimeSyncChecker:
@@ -116,7 +116,7 @@ class TimeSyncChecker:
         else:
             log.debug("clock_drift_ok", drift_ms=drift_ms)
 
-        return drift_ms
+        return float(drift_ms)
 
     async def start_background_loop(self) -> None:
         """Run drift checks continuously in the background.

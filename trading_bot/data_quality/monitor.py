@@ -2,7 +2,7 @@
 
 Freshness check:
 - Each (exchange, symbol, timeframe) has an expected update interval
-- If last_update > N × interval → DataStalenessEvent
+- If last_update > N x interval → DataStalenessEvent
 
 Anomaly detection:
 - Compute rolling z-score of log-returns
@@ -101,7 +101,8 @@ class DataQualityMonitor:
             result["anomaly"] = False
             return result
 
-        log_returns = np.log(result["close"] / result["close"].shift(1))
+        close: pd.Series = result["close"]
+        log_returns: pd.Series = pd.Series(np.log(close / close.shift(1)))
         rolling_mean = log_returns.rolling(window=window, min_periods=10).mean()
         rolling_std = log_returns.rolling(window=window, min_periods=10).std()
 

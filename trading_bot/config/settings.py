@@ -13,7 +13,7 @@ from __future__ import annotations
 import functools
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import Field, field_validator, model_validator
@@ -184,7 +184,7 @@ class Settings(BaseSettings):
         return str(v).lower()
 
     @model_validator(mode="after")
-    def validate_production_secrets(self) -> "Settings":
+    def validate_production_secrets(self) -> Settings:
         """In production, critical secrets must be explicitly set."""
         if self.environment == "production":
             missing = []
@@ -216,7 +216,7 @@ class Settings(BaseSettings):
                 }
             return obj
 
-        return _redact(raw)  # type: ignore[return-value]
+        return cast(dict[str, Any], _redact(raw))
 
     def effective_binance_url(self) -> str:
         """Returns the correct Binance URL based on testnet setting."""

@@ -20,14 +20,14 @@ Data lineage:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
-from trading_bot.core.exceptions import DataFetchError, DataValidationError
-from trading_bot.core.models import DataLineage, ExchangeId, OHLCVBar
+from trading_bot.core.exceptions import DataFetchError
+from trading_bot.core.models import DataLineage, ExchangeId
 from trading_bot.observability.logging import get_logger
 from trading_bot.observability.tracing import start_span
 
@@ -89,7 +89,7 @@ class OHLCVDownloader:
                 path=str(parquet_path),
                 last_timestamp=last_ts.isoformat(),
             )
-            return last_ts
+            return cast(datetime, last_ts)
         except Exception as e:
             log.warning("resume_timestamp_read_failed", path=str(parquet_path), error=str(e))
             return None
@@ -172,7 +172,7 @@ class OHLCVDownloader:
         parquet_path: Path,
     ) -> int:
         """Fetch a chunk, validate, merge with existing file, save."""
-        fetched_at = datetime.now(timezone.utc)
+        fetched_at = datetime.now(UTC)
 
         try:
             raw_bars: list[dict[str, Any]] = await self._exchange.fetch_ohlcv(
@@ -207,7 +207,7 @@ class OHLCVDownloader:
 
         # Merge with existing file (idempotent: deduplicate on open_time)
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
-        if parquet_path.exists():
+        if parquet_path.exists():  # noqa: ASYNC240
             existing = pd.read_parquet(parquet_path)
             df = pd.concat([existing, df], ignore_index=True)
 

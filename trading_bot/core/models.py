@@ -8,13 +8,12 @@ class of timestamp-related bugs (see ADR-0007 for rationale).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -110,7 +109,7 @@ class OHLCVBar(BaseModel):
     trade_count: int | None = None
 
     # Lineage metadata — required for data quality tracking
-    fetched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source: str = ""
     schema_version: str = "1.0"
 
@@ -125,11 +124,11 @@ class OHLCVBar(BaseModel):
                     "All timestamps must be UTC-aware (use datetime.now(timezone.utc) "
                     "or pandas Timestamp with tz='UTC')."
                 )
-            return v.astimezone(timezone.utc)
+            return v.astimezone(UTC)
         raise ValueError(f"Expected datetime, got {type(v)}")
 
     @model_validator(mode="after")
-    def validate_ohlcv_invariants(self) -> "OHLCVBar":
+    def validate_ohlcv_invariants(self) -> OHLCVBar:
         """Enforce physical OHLCV invariants."""
         if self.high < self.low:
             raise ValueError(f"high ({self.high}) < low ({self.low})")
@@ -162,7 +161,7 @@ class Ticker(BaseModel):
     def require_utc(cls, v: Any) -> datetime:
         if isinstance(v, datetime) and v.tzinfo is None:
             raise ValueError("Naive datetime rejected in Ticker.timestamp")
-        return v
+        return cast(datetime, v)
 
     @property
     def spread(self) -> Decimal:
@@ -197,7 +196,7 @@ class OrderRequest(BaseModel):
     idempotency_key: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
     @model_validator(mode="after")
-    def validate_limit_order(self) -> "OrderRequest":
+    def validate_limit_order(self) -> OrderRequest:
         if self.order_type == OrderType.LIMIT and self.limit_price is None:
             raise ValueError("LIMIT order requires limit_price")
         if self.order_type == OrderType.STOP and self.stop_price is None:
@@ -222,8 +221,8 @@ class OrderState(BaseModel):
     filled_quantity: Decimal = Decimal("0")
     average_fill_price: Decimal | None = None
     status: OrderStatus = OrderStatus.PENDING
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     strategy_id: str = ""
     correlation_id: str = ""
     idempotency_key: str = ""
@@ -270,7 +269,7 @@ class PortfolioSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     snapshot_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    taken_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    taken_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     cash_balance: Decimal
     positions: list[Position]
     total_equity: Decimal
@@ -279,7 +278,7 @@ class PortfolioSnapshot(BaseModel):
     correlation_id: str = ""
 
     @model_validator(mode="after")
-    def validate_drawdown(self) -> "PortfolioSnapshot":
+    def validate_drawdown(self) -> PortfolioSnapshot:
         if self.daily_drawdown_pct < -1:
             raise ValueError("daily_drawdown_pct cannot be below -100%")
         return self
@@ -303,7 +302,7 @@ class Signal(BaseModel):
     exchange: ExchangeId
     side: OrderSide
     strength: float = Field(ge=0.0, le=1.0)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     hypothesis: str = ""  # why this signal was emitted (audit trail)
     correlation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     config_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -321,7 +320,7 @@ class DataLineage(BaseModel):
 
     source: str  # e.g. "binance.fetch_ohlcv"
     fetched_at: datetime
-    processed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    processed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     validator_version: str = "1.0"
     schema_version: str = "1.0"
     row_count: int

@@ -14,7 +14,7 @@ TTL: 7 days (604800 seconds). Old keys are cleaned up by a scheduled job.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from trading_bot.core.contracts import IdempotencyStoreInterface
@@ -45,7 +45,7 @@ class PostgresIdempotencyStore(IdempotencyStoreInterface):
 
         Uses INSERT ... ON CONFLICT DO NOTHING for atomicity under concurrent access.
         """
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
 
         async with self._pool.acquire() as conn:
             result = await conn.execute(
@@ -60,7 +60,7 @@ class PostgresIdempotencyStore(IdempotencyStoreInterface):
             )
 
         # "INSERT 0 0" means conflict (duplicate) — "INSERT 0 1" means inserted
-        acquired = result == "INSERT 0 1"
+        acquired: bool = result == "INSERT 0 1"
         if not acquired:
             IDEMPOTENCY_HITS.inc()
             log.warning(

@@ -9,9 +9,10 @@ and enable test doubles (mocks/stubs) without importing real dependencies.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, AsyncIterator
+from typing import Any
 
 
 class ExchangeInterface(ABC):
@@ -95,7 +96,15 @@ class AuditLogInterface(ABC):
     """Append-only, hash-chained audit log."""
 
     @abstractmethod
-    async def append(self, event: Any) -> str:
+    async def append(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        correlation_id: str = "",
+        actor: str = "system",
+        occurred_at: datetime | None = None,
+        config_snapshot: dict[str, Any] | None = None,
+    ) -> str:
         """Append an event to the audit log. Returns the event hash."""
 
     @abstractmethod

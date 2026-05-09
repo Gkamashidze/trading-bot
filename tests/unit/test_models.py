@@ -8,7 +8,7 @@ Tests:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -19,26 +19,26 @@ from trading_bot.core.models import (
     OrderRequest,
     OrderSide,
     OrderType,
-    Signal,
     PromotionStage,
+    Signal,
 )
 
 
 class TestOHLCVBar:
     def _valid_bar(self, **kwargs: object) -> dict:
-        base: dict = dict(
-            symbol="BTC/USDT",
-            exchange=ExchangeId.BINANCE,
-            timeframe="1d",
-            open_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            close_time=datetime(2024, 1, 1, 23, 59, 59, tzinfo=timezone.utc),
-            open=Decimal("50000"),
-            high=Decimal("51000"),
-            low=Decimal("49000"),
-            close=Decimal("50500"),
-            volume=Decimal("1000"),
-            quote_volume=Decimal("50000000"),
-        )
+        base: dict = {
+            "symbol": "BTC/USDT",
+            "exchange": ExchangeId.BINANCE,
+            "timeframe": "1d",
+            "open_time": datetime(2024, 1, 1, tzinfo=UTC),
+            "close_time": datetime(2024, 1, 1, 23, 59, 59, tzinfo=UTC),
+            "open": Decimal("50000"),
+            "high": Decimal("51000"),
+            "low": Decimal("49000"),
+            "close": Decimal("50500"),
+            "volume": Decimal("1000"),
+            "quote_volume": Decimal("50000000"),
+        }
         base.update(kwargs)
         return base
 
@@ -52,12 +52,12 @@ class TestOHLCVBar:
         with pytest.raises(ValueError, match="Naive datetime"):
             OHLCVBar(
                 **self._valid_bar(
-                    open_time=datetime(2024, 1, 1)  # no tzinfo
+                    open_time=datetime(2024, 1, 1),  # noqa: DTZ001 — intentionally naive to test rejection
                 )
             )
 
     def test_high_less_than_low_rejected(self) -> None:
-        with pytest.raises(ValueError, match="high.*low"):
+        with pytest.raises(ValueError, match=r"high.*low"):
             OHLCVBar(**self._valid_bar(high=Decimal("48000"), low=Decimal("49000")))
 
     def test_open_outside_high_low_rejected(self) -> None:
@@ -70,7 +70,7 @@ class TestOHLCVBar:
 
     def test_close_time_before_open_time_rejected(self) -> None:
         with pytest.raises(ValueError, match="close_time"):
-            OHLCVBar(**self._valid_bar(close_time=datetime(2023, 12, 31, tzinfo=timezone.utc)))
+            OHLCVBar(**self._valid_bar(close_time=datetime(2023, 12, 31, tzinfo=UTC)))
 
 
 class TestOrderRequest:

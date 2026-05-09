@@ -18,15 +18,10 @@ These tests verify INVARIANTS — things that must always be true:
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 
-import numpy as np
 import pandas as pd
-import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-
 
 # ---------------------------------------------------------------------------
 # Risk sizing invariants
@@ -39,7 +34,7 @@ def fractional_kelly(
     avg_loss: float,
     kelly_fraction: float = 0.25,
 ) -> float:
-    """Kelly criterion: f* = (W/L - (1-p)/p) × fraction."""
+    """Kelly criterion: f* = (W/L - (1-p)/p) x fraction."""
     if avg_loss == 0:
         return 0.0
     b = avg_win / avg_loss  # win/loss ratio

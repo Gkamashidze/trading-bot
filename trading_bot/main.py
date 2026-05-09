@@ -24,8 +24,10 @@ from __future__ import annotations
 import asyncio
 import sys
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from trading_bot.config import get_settings
-from trading_bot.database.connection import close_pool, get_pool, init_pool
+from trading_bot.database.connection import close_pool, init_pool
 from trading_bot.feature_flags.store import FeatureFlagStore, set_default_store
 from trading_bot.idempotency.decorator import set_default_store as set_idem_store
 from trading_bot.idempotency.store import PostgresIdempotencyStore
@@ -38,7 +40,7 @@ from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutd
 log = get_logger(__name__)
 
 
-async def _startup() -> tuple[object, object]:
+async def _startup() -> tuple[AsyncIOScheduler | None, object]:
     """Perform all startup tasks. Returns (scheduler, pool)."""
     settings = get_settings()
 
@@ -81,7 +83,7 @@ async def _startup() -> tuple[object, object]:
         idem_store = PostgresIdempotencyStore(pool)
         set_idem_store(idem_store)
     else:
-        pool = None  # type: ignore[assignment]
+        pool = None
         log.warning(
             "database_not_configured",
             action="running_without_db",
@@ -114,12 +116,12 @@ async def _startup() -> tuple[object, object]:
     return scheduler, pool
 
 
-async def _shutdown(scheduler: object, pool: object) -> None:
+async def _shutdown(scheduler: AsyncIOScheduler | None, pool: object) -> None:
     """Graceful shutdown — drain, close, exit."""
     log.info("graceful_shutdown_initiated")
 
     if scheduler is not None:
-        scheduler.shutdown(wait=True)  # type: ignore[union-attr]
+        scheduler.shutdown(wait=True)
         log.info("scheduler_shutdown")
 
     if pool is not None:

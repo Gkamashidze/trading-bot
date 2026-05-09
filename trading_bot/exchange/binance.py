@@ -15,10 +15,9 @@ Key rotation: every 90 days. Set calendar reminder.
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import ccxt.async_support as ccxt
 from tenacity import (
@@ -35,7 +34,7 @@ from trading_bot.core.exceptions import (
     ExchangeRateLimitError,
 )
 from trading_bot.observability.logging import get_logger
-from trading_bot.observability.metrics import API_LATENCY, WEBSOCKET_RECONNECTS
+from trading_bot.observability.metrics import API_LATENCY
 from trading_bot.observability.tracing import get_tracer, start_span
 
 log = get_logger(__name__)
@@ -109,18 +108,20 @@ class BinanceExchange(ExchangeInterface):
         if since is not None:
             since_ms = int(since.timestamp() * 1000)
 
-        with start_span(
-            "exchange.fetch_ohlcv",
-            {"exchange": "binance", "symbol": symbol, "timeframe": timeframe},
+        with (
+            start_span(
+                "exchange.fetch_ohlcv",
+                {"exchange": "binance", "symbol": symbol, "timeframe": timeframe},
+            ),
+            API_LATENCY.labels(exchange="binance", method="fetch_ohlcv").time(),
         ):
-            timer = API_LATENCY.labels(exchange="binance", method="fetch_ohlcv").time()
             try:
                 raw = await self._client.fetch_ohlcv(
                     symbol, timeframe=timeframe, since=since_ms, limit=limit
                 )
                 return [
                     {
-                        "open_time": datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc),
+                        "open_time": datetime.fromtimestamp(row[0] / 1000, tz=UTC),
                         "open": Decimal(str(row[1])),
                         "high": Decimal(str(row[2])),
                         "low": Decimal(str(row[3])),
@@ -130,7 +131,7 @@ class BinanceExchange(ExchangeInterface):
                         "trade_count": int(row[8]) if len(row) > 8 else None,
                         "close_time": datetime.fromtimestamp(
                             (row[0] + _timeframe_to_ms(timeframe) - 1) / 1000,
-                            tz=timezone.utc,
+                            tz=UTC,
                         ),
                     }
                     for row in raw
@@ -143,15 +144,13 @@ class BinanceExchange(ExchangeInterface):
                 ) from e
             except ccxt.NetworkError as e:
                 raise ExchangeConnectionError(f"Binance network error: {e}") from e
-            finally:
-                timer.observe(0)  # observe called by context manager when __exit__
 
     async def get_server_time(self) -> datetime:
         """Return Binance server time as UTC-aware datetime."""
         with start_span("exchange.get_server_time", {"exchange": "binance"}):
             try:
                 result = await self._client.fetch_time()
-                return datetime.fromtimestamp(result / 1000, tz=timezone.utc)
+                return datetime.fromtimestamp(result / 1000, tz=UTC)
             except ccxt.NetworkError as e:
                 raise ExchangeConnectionError(f"Cannot reach Binance: {e}") from e
 
@@ -169,7 +168,7 @@ class BinanceExchange(ExchangeInterface):
 
     async def fetch_open_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
         """Return open orders. Stage 0: not yet implemented for live trading."""
-        return await self._client.fetch_open_orders(symbol)
+        return cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol))
 
     async def fetch_trade_fees(self, symbol: str) -> dict[str, Decimal]:
         fees = await self._client.fetch_trading_fee(symbol)
@@ -180,7 +179,7 @@ class BinanceExchange(ExchangeInterface):
 
     async def get_symbol_info(self, symbol: str) -> dict[str, Any]:
         markets = await self._client.load_markets()
-        return markets.get(symbol, {})
+        return cast(dict[str, Any], markets.get(symbol, {}))
 
     async def place_order(self, order: Any) -> dict[str, Any]:
         raise NotImplementedError("Stage 0: order placement not yet enabled. See Stage 5.")

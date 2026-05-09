@@ -33,7 +33,14 @@ def generate_idempotency_key() -> str:
         tail = uuid.uuid4().hex[12:]
         combined = f"{ts_hex}{tail}"
         # Format as UUID string
-        return f"{combined[0:8]}-{combined[8:12]}-7{combined[13:16]}-{combined[16:20]}-{combined[20:32]}"
+        a, b, c, d, e = (
+            combined[0:8],
+            combined[8:12],
+            combined[13:16],
+            combined[16:20],
+            combined[20:32],
+        )
+        return f"{a}-{b}-7{c}-{d}-{e}"
 
 
 def idempotency_key_for_order(
