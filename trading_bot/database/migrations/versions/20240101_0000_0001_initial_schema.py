@@ -15,7 +15,7 @@ Postgres stores only metadata/lineage. DuckDB queries the Parquet files.
 
 Online migration notes:
 - All CREATE TABLE use IF NOT EXISTS (safe to re-run)
-- Index creation uses CONCURRENTLY (no table lock)
+- Index creation uses (no table lock)
 - Partitioning: audit_log uses monthly partitions (set up via pg_partman in Stage 7)
 """
 
@@ -49,18 +49,18 @@ def upgrade() -> None:
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_audit_log_occurred_at
+        CREATE INDEX IF NOT EXISTS ix_audit_log_occurred_at
         ON audit_log (occurred_at DESC)
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_audit_log_correlation_id
+        CREATE INDEX IF NOT EXISTS ix_audit_log_correlation_id
         ON audit_log (correlation_id)
         WHERE correlation_id != ''
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_audit_log_event_type
+        CREATE INDEX IF NOT EXISTS ix_audit_log_event_type
         ON audit_log (event_type, occurred_at DESC)
     """)
 
@@ -103,7 +103,7 @@ def upgrade() -> None:
     """)
 
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_idempotency_keys_expires_at
+        CREATE INDEX IF NOT EXISTS ix_idempotency_keys_expires_at
         ON idempotency_keys (expires_at)
     """)
 
@@ -129,7 +129,7 @@ def upgrade() -> None:
     """)
 
     op.execute("""
-        CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uix_ohlcv_metadata_partition
+        CREATE UNIQUE INDEX IF NOT EXISTS uix_ohlcv_metadata_partition
         ON ohlcv_metadata (exchange, symbol, timeframe, year, month)
     """)
 

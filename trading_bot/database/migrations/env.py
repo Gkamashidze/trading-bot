@@ -28,8 +28,10 @@ if not database_url:
         "DATABASE_URL environment variable is not set. Set it before running alembic commands."
     )
 
-# Normalise to asyncpg scheme regardless of what was passed in
-if database_url.startswith("postgresql://"):
+# Normalise to asyncpg scheme — Railway may provide postgres:// or postgresql://
+if database_url.startswith("postgres://"):
+    database_url = "postgresql+asyncpg://" + database_url[len("postgres://"):]
+elif database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 config.set_main_option("sqlalchemy.url", database_url)

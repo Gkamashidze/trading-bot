@@ -176,19 +176,23 @@ async def _shutdown(
 
 
 async def main_async() -> None:
+    # Start HTTP server IMMEDIATELY so Railway /health responds during startup.
+    # uvicorn must be up before _startup() finishes to pass the 30s healthcheck.
+    dashboard_task = asyncio.create_task(_run_dashboard())
+
     scheduler = None
     pool = None
     alerter = None
     try:
         scheduler, pool, alerter = await _startup()
-        # Run dashboard server and shutdown-waiter concurrently
         await asyncio.gather(
-            _run_dashboard(),
+            dashboard_task,
             wait_for_shutdown(),
             return_exceptions=True,
         )
     except Exception as e:
         log.error("startup_failed", error=str(e), exc_info=True)
+        dashboard_task.cancel()
         sys.exit(1)
     finally:
         await _shutdown(scheduler, pool, alerter)

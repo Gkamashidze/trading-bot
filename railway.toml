@@ -2,8 +2,8 @@
 builder = "dockerfile"
 
 [deploy]
-startCommand = "python -m trading_bot.main"
+startCommand = "alembic upgrade head && python -m trading_bot.main"
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

@@ -83,7 +83,8 @@ def create_app() -> FastAPI:
             try:
                 async with _pool.acquire() as conn:
                     rows = await conn.fetch(
-                        "SELECT name, enabled, description FROM feature_flags ORDER BY name"
+                        "SELECT flag_name AS name, enabled, reason AS description"
+                        " FROM feature_flags ORDER BY flag_name"
                     )
                     flags = [dict(r) for r in rows]
             except Exception as e:
@@ -121,9 +122,11 @@ def create_app() -> FastAPI:
             try:
                 async with _pool.acquire() as conn:
                     rows = await conn.fetch(
-                        """SELECT event_type, actor, details, created_at
+                        """SELECT event_type, actor,
+                                  payload::text AS details,
+                                  occurred_at AS created_at
                            FROM audit_log
-                           ORDER BY created_at DESC
+                           ORDER BY occurred_at DESC
                            LIMIT 30"""
                     )
                     entries = [dict(r) for r in rows]
@@ -143,9 +146,9 @@ def create_app() -> FastAPI:
             async with _pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """UPDATE feature_flags
-                       SET enabled = NOT enabled, updated_at = NOW()
-                       WHERE name = $1
-                       RETURNING name, enabled, description""",
+                       SET enabled = NOT enabled, changed_at = NOW()
+                       WHERE flag_name = $1
+                       RETURNING flag_name AS name, enabled, reason AS description""",
                     name,
                 )
             if row is None:
