@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from apscheduler.executors.asyncio import AsyncIOExecutor
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from tenacity import (
     retry,
@@ -36,12 +36,14 @@ log = get_logger(__name__)
 
 
 def create_scheduler(database_url: str) -> AsyncIOScheduler:
-    """Create and configure an AsyncIOScheduler with Postgres job store."""
-    # Alembic/asyncpg use postgresql+asyncpg://; APScheduler needs synchronous URL
-    sync_url = database_url.replace("+asyncpg", "")
+    """Create and configure an AsyncIOScheduler with in-memory job store.
 
+    Stage 0 uses MemoryJobStore — jobs are redefined in code on every startup,
+    so persistence across restarts is not needed. Switch to SQLAlchemyJobStore
+    (with psycopg2/pg8000) at Stage 5+ when job history matters.
+    """
     jobstores = {
-        "default": SQLAlchemyJobStore(url=sync_url),
+        "default": MemoryJobStore(),
     }
     executors = {
         "default": AsyncIOExecutor(),
