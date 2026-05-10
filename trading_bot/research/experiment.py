@@ -26,6 +26,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -36,6 +37,18 @@ from enum import StrEnum
 from trading_bot.observability.logging import get_logger
 
 log = get_logger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_persist(coro) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(coro)
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except RuntimeError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -136,14 +149,7 @@ class ExperimentRegistry:
             strategy_id=strategy_id,
             fingerprint=artifact.fingerprint[:12],
         )
-        # Fire-and-forget persistence — import asyncio to schedule if in async context
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._persist(artifact))
-        except RuntimeError:
-            pass  # Not in async context — caller must call _persist() explicitly
+        _schedule_persist(self._persist(artifact))
         return artifact
 
     def approve(self, experiment_id: str, approved_by: str) -> ExperimentArtifact:
@@ -168,13 +174,7 @@ class ExperimentRegistry:
         )
         self._store[experiment_id] = updated
         log.info("experiment_approved", experiment_id=experiment_id, approved_by=approved_by)
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._persist(updated))
-        except RuntimeError:
-            pass
+        _schedule_persist(self._persist(updated))
         return updated
 
     def archive(self, experiment_id: str) -> ExperimentArtifact:
@@ -196,13 +196,7 @@ class ExperimentRegistry:
         )
         self._store[experiment_id] = updated
         log.info("experiment_archived", experiment_id=experiment_id)
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._persist(updated))
-        except RuntimeError:
-            pass
+        _schedule_persist(self._persist(updated))
         return updated
 
     def get(self, experiment_id: str) -> ExperimentArtifact | None:

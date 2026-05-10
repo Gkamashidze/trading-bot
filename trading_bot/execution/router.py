@@ -103,7 +103,7 @@ async def route_signal(result: StrategyResult) -> None:
                 "router_reconciliation_block",
                 strategy=result.strategy_id,
                 signal=result.signal,
-                note="new orders blocked — critical reconciliation mismatch pending operator review",
+                note="new orders blocked — critical reconciliation mismatch",
             )
             tracker = get_order_tracker()
             # Record the rejection so operators can see blocked orders in /open_orders
