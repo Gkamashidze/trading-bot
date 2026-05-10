@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from fastapi.templating import Jinja2Templates
 
@@ -482,6 +482,123 @@ def create_app() -> FastAPI:
             request=request,
             name="partials/market_context.html",
             context={"ctx": ctx},
+        )
+
+    # ── Evidence store endpoints (read-only, no auth required except exports) ─
+
+    @app.get("/evidence/session", response_class=JSONResponse)
+    async def evidence_session() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        row = await ev_store.get_session_report(session_id)
+        return JSONResponse(row)
+
+    @app.get("/evidence/daily", response_class=JSONResponse)
+    async def evidence_daily() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        rows = await ev_store.list_daily_summaries(session_id, limit=90)
+        return JSONResponse(rows)
+
+    @app.get("/evidence/weekly", response_class=JSONResponse)
+    async def evidence_weekly() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        rows = await ev_store.list_weekly_summaries(session_id, limit=12)
+        return JSONResponse(rows)
+
+    @app.get("/evidence/portfolio_snapshots", response_class=JSONResponse)
+    async def evidence_portfolio_snapshots() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        rows = await ev_store.list_portfolio_snapshots(session_id, limit=50)
+        return JSONResponse(rows)
+
+    @app.get("/evidence/reconciliation", response_class=JSONResponse)
+    async def evidence_reconciliation() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        rows = await ev_store.list_reconciliation_reports(session_id, limit=50)
+        return JSONResponse(rows)
+
+    @app.get("/evidence/report", response_class=JSONResponse)
+    async def evidence_report() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        row = await ev_store.get_session_report(session_id)
+        return JSONResponse(row)
+
+    @app.get("/evidence/final_report", response_class=JSONResponse)
+    async def evidence_final_report() -> JSONResponse:
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+        from trading_bot.evidence.reporter import EvidenceReporter
+
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        reporter = EvidenceReporter(ev_store)
+        report = await reporter.generate_final_report(session_id)
+        return JSONResponse(report.model_dump(mode="json"))
+
+    @app.get("/evidence/export/json", response_class=JSONResponse)
+    async def evidence_export_json(x_api_key: str = "") -> JSONResponse:
+        import os
+
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        if x_api_key != os.environ.get("DASHBOARD_API_KEY", ""):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        data = await ev_store.export_session_json(session_id)
+        return JSONResponse(data)
+
+    @app.get("/evidence/export/csv")
+    async def evidence_export_csv(x_api_key: str = "") -> Response:
+        import os
+
+        from starlette.responses import Response as StarletteResponse
+
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        if x_api_key != os.environ.get("DASHBOARD_API_KEY", ""):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        ev_store = get_evidence_store()
+        session_id = get_current_session_id()
+        if ev_store is None or session_id is None:
+            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+        csv_text = await ev_store.export_session_csv(session_id)
+        return StarletteResponse(
+            content=csv_text,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=evidence_{session_id}.csv"},
         )
 
     return app

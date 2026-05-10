@@ -221,6 +221,77 @@ async def state_snapshot_job() -> None:
     )
 
 
+async def evidence_portfolio_snapshot_job() -> None:
+    """Capture a portfolio snapshot into the evidence store. Runs every 15 min."""
+    import hashlib
+    from decimal import Decimal
+
+    from trading_bot.evidence import get_current_session_id, get_evidence_store
+    from trading_bot.evidence.models import PortfolioEvidenceSnapshot
+    from trading_bot.portfolio.manager import get_portfolio_manager
+
+    ev_store = get_evidence_store()
+    session_id = get_current_session_id()
+    if ev_store is None or session_id is None:
+        log.debug("evidence_snapshot_skipped", reason="no_active_session")
+        return
+
+    portfolio = get_portfolio_manager()
+    pf_snap = portfolio.get_snapshot()
+    now = pf_snap.taken_at
+    ts_bucket = now.strftime("%Y%m%d%H%M")
+    raw = f"{session_id}|{ts_bucket}"
+    idem_key = f"portfolio_snapshot:{hashlib.sha256(raw.encode()).hexdigest()[:16]}"
+
+    positions_map = {pos.symbol: pos.quantity for pos in pf_snap.positions}
+    snapshot = PortfolioEvidenceSnapshot(
+        session_id=session_id,
+        captured_at=now,
+        total_equity=pf_snap.total_equity,
+        cash_balance=pf_snap.cash_balance,
+        positions={sym: Decimal(str(qty)) for sym, qty in positions_map.items()},
+        unrealized_pnl=Decimal("0"),
+        daily_pnl=pf_snap.daily_pnl,
+        daily_drawdown_pct=pf_snap.daily_drawdown_pct,
+        max_drawdown_pct=Decimal("0"),
+        idempotency_key=idem_key,
+    )
+    inserted = await ev_store.insert_portfolio_snapshot(snapshot)
+    log.debug("evidence_portfolio_snapshot_job_complete", inserted=inserted)
+
+
+async def evidence_daily_summary_job() -> None:
+    """Generate and persist the previous day's evidence summary. Runs at UTC 00:05."""
+    from trading_bot.evidence import get_current_session_id, get_evidence_store
+    from trading_bot.evidence.reporter import EvidenceReporter
+
+    ev_store = get_evidence_store()
+    session_id = get_current_session_id()
+    if ev_store is None or session_id is None:
+        log.debug("evidence_daily_summary_skipped", reason="no_active_session")
+        return
+
+    reporter = EvidenceReporter(ev_store)
+    summary = await reporter.generate_and_persist_daily_summary(session_id)
+    log.info("evidence_daily_summary_job_complete", summary_generated=summary is not None)
+
+
+async def evidence_weekly_summary_job() -> None:
+    """Generate and persist the previous week's evidence summary. Runs Monday 00:10 UTC."""
+    from trading_bot.evidence import get_current_session_id, get_evidence_store
+    from trading_bot.evidence.reporter import EvidenceReporter
+
+    ev_store = get_evidence_store()
+    session_id = get_current_session_id()
+    if ev_store is None or session_id is None:
+        log.debug("evidence_weekly_summary_skipped", reason="no_active_session")
+        return
+
+    reporter = EvidenceReporter(ev_store)
+    summary = await reporter.generate_and_persist_weekly_summary(session_id)
+    log.info("evidence_weekly_summary_job_complete", summary_generated=summary is not None)
+
+
 def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register the default daily ingestion jobs.
 
@@ -320,5 +391,36 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         name="Daily promotion gate evaluation (02:00 UTC)",
         replace_existing=True,
     )
+
+    if settings.evidence.enabled:
+        scheduler.add_job(
+            evidence_portfolio_snapshot_job,
+            trigger="interval",
+            minutes=settings.evidence.portfolio_snapshot_interval_minutes,
+            id="evidence_portfolio_snapshot",
+            name="Evidence portfolio snapshot (15 min)",
+            replace_existing=True,
+        )
+
+        scheduler.add_job(
+            evidence_daily_summary_job,
+            trigger="cron",
+            hour=0,
+            minute=5,
+            id="evidence_daily_summary",
+            name="Evidence daily summary (UTC 00:05)",
+            replace_existing=True,
+        )
+
+        scheduler.add_job(
+            evidence_weekly_summary_job,
+            trigger="cron",
+            day_of_week="mon",
+            hour=0,
+            minute=10,
+            id="evidence_weekly_summary",
+            name="Evidence weekly summary (Monday 00:10 UTC)",
+            replace_existing=True,
+        )
 
     log.info("default_scheduler_jobs_registered")

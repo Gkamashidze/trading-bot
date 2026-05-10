@@ -116,6 +116,34 @@ async def _startup() -> tuple[
         # OMS tracker — wire pool and rehydrate order history from DB
         tracker = init_tracker(pool)
         await tracker.load_recent()
+
+        # Evidence store — start or resume paper testing session
+        if settings.evidence.enabled:
+            import os
+            from decimal import Decimal as _Decimal
+
+            from trading_bot.evidence import init_evidence_store, set_current_session_id
+            from trading_bot.strategies.registry import get_strategy_registry
+
+            ev_store = init_evidence_store(pool)
+            try:
+                strategies_list = [e.strategy_id for e in get_strategy_registry().all_entries()]
+                ev_session = await ev_store.ensure_session(
+                    environment=settings.environment,
+                    config_snapshot=settings.snapshot(),
+                    paper_capital=_Decimal(os.environ.get("PAPER_CAPITAL", "10000")),
+                    symbols=settings.trading.crypto.symbols,
+                    strategies=strategies_list,
+                    git_commit=os.environ.get("GIT_COMMIT"),
+                )
+                set_current_session_id(ev_session.session_id)
+                log.info(
+                    "evidence_session_active",
+                    session_id=str(ev_session.session_id),
+                    status=ev_session.status,
+                )
+            except Exception as ev_exc:
+                log.warning("evidence_session_start_failed", error=str(ev_exc))
     else:
         pool = None
         log.warning(

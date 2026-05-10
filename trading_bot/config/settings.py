@@ -194,6 +194,21 @@ class TradingSettings(BaseSettings):
     equity: TradingEquitySettings = Field(default_factory=TradingEquitySettings)
 
 
+class EvidenceSettings(BaseSettings):
+    """Paper testing evidence capture configuration."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    enabled: bool = True
+    min_days: int = 30
+    min_trades: int = 20
+    max_drawdown_pct: float = 0.20
+    max_rejected_rate: float = 0.10
+    min_parity_score: float = 0.70
+    max_evidence_gap_hours: int = 25
+    portfolio_snapshot_interval_minutes: int = 15
+
+
 # ---------------------------------------------------------------------------
 # Root settings
 # ---------------------------------------------------------------------------
@@ -231,6 +246,7 @@ class Settings(BaseSettings):
     trading: TradingSettings = Field(default_factory=TradingSettings)
     market_context: MarketContextSettings = Field(default_factory=MarketContextSettings)
     capital_allocation: CapitalAllocationSettings = Field(default_factory=CapitalAllocationSettings)
+    evidence: EvidenceSettings = Field(default_factory=EvidenceSettings)
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -300,6 +316,7 @@ def _load_settings() -> Settings:
         "trading",
         "market_context",
         "capital_allocation",
+        "evidence",
     ):
         if key in yaml_defaults:
             nested_overrides[key] = yaml_defaults[key]
