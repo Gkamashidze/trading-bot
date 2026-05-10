@@ -345,12 +345,16 @@ def create_app() -> FastAPI:
     async def partial_prices(request: Request) -> HTMLResponse:
         from trading_bot.config import get_settings
 
-        primary_ws = get_settings().trading.crypto.symbols[0].replace("/", "").upper()
-        tick = get_price_cache().get(primary_ws)
+        cache = get_price_cache()
+        ticks = []
+        for sym in get_settings().trading.crypto.symbols:
+            ws_sym = sym.replace("/", "").upper()
+            tick = cache.get(ws_sym)
+            ticks.append({"symbol": sym, "ws_symbol": ws_sym, "tick": tick})
         return templates.TemplateResponse(
             request=request,
             name="partials/prices.html",
-            context={"tick": tick},
+            context={"ticks": ticks},
         )
 
     @app.get("/partials/signals", response_class=HTMLResponse)

@@ -1,79 +1,85 @@
-{% if tick %}
-{% set chg = tick.change_pct %}
-{% set up = chg >= 0 %}
-<div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+{% set coin_names = {
+  'BTC/USDT': 'ბიტქოინი',
+  'ETH/USDT': 'ეთერიუმი',
+  'BNB/USDT': 'BNB',
+  'SOL/USDT': 'სოლანა',
+} %}
 
-  <!-- სათაური -->
-  <div class="flex items-center justify-between mb-4">
-    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">ბიტქოინი / დოლარი</h2>
-    <span class="text-xs text-gray-600">განახლება: რეალური დრო</span>
-  </div>
+{% set coin_units = {
+  'BTC/USDT': 'BTC',
+  'ETH/USDT': 'ETH',
+  'BNB/USDT': 'BNB',
+  'SOL/USDT': 'SOL',
+} %}
 
-  <!-- ძირითადი ფასი -->
-  <div class="flex items-end gap-4 mb-2">
-    <span class="text-4xl font-bold text-white">${{ "%.2f"|format(tick.price|float) }}</span>
-    <span class="text-xl font-semibold mb-0.5 {% if up %}text-green-400{% else %}text-red-400{% endif %}">
-      {% if up %}▲{% else %}▼{% endif %}
-      {{ "%.2f"|format(chg|abs) }}%
-    </span>
-  </div>
+<div class="grid grid-cols-1 {% if ticks|length > 1 %}md:grid-cols-{{ [ticks|length, 3]|min }}{% endif %} gap-4">
+{% for item in ticks %}
+  {% set tick = item.tick %}
+  {% set sym = item.symbol %}
+  {% set name = coin_names.get(sym, sym) %}
+  {% set unit = coin_units.get(sym, sym.split('/')[0]) %}
 
-  <!-- ქართული ახსნა — ცვლილება -->
-  <p class="text-sm {% if up %}text-green-300{% else %}text-red-300{% endif %} mb-4">
-    {% if up %}
-      ბიტქოინი ბოლო 24 საათში <strong>გაძვირდა</strong> — ანუ მყიდველები გამყიდველებზე მეტი იყო, ბაზარი ოპტიმისტურია.
-    {% else %}
-      ბიტქოინი ბოლო 24 საათში <strong>გაიაფდა</strong> — ანუ გამყიდველები მყიდველებზე მეტი იყო, ბაზარი ფრთხილობს.
-    {% endif %}
-  </p>
+  {% if tick %}
+  {% set chg = tick.change_pct %}
+  {% set up = chg >= 0 %}
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
 
-  <!-- დღის Max/Min + მოცულობა -->
-  <div class="grid grid-cols-3 gap-4 text-sm">
-
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-gray-500 text-xs mb-1">დღის მაქსიმუმი</p>
-      <p class="text-green-400 font-semibold">${{ "%.0f"|format(tick.high_24h|float) }}</p>
-      <p class="text-gray-600 text-xs mt-1">ყველაზე ძვირი გარიგება 24სთ-ში</p>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">{{ name }} / დოლარი</h2>
+      <span class="text-xs text-gray-600">რეალური დრო</span>
     </div>
 
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-gray-500 text-xs mb-1">დღის მინიმუმი</p>
-      <p class="text-red-400 font-semibold">${{ "%.0f"|format(tick.low_24h|float) }}</p>
-      <p class="text-gray-600 text-xs mt-1">ყველაზე იაფი გარიგება 24სთ-ში</p>
+    <div class="flex items-end gap-3 mb-2">
+      <span class="text-3xl font-bold text-white">${{ "%.2f"|format(tick.price|float) }}</span>
+      <span class="text-lg font-semibold mb-0.5 {% if up %}text-green-400{% else %}text-red-400{% endif %}">
+        {% if up %}▲{% else %}▼{% endif %}
+        {{ "%.2f"|format(chg|abs) }}%
+      </span>
     </div>
 
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-gray-500 text-xs mb-1">გარიგებების მოცულობა</p>
-      <p class="text-blue-400 font-semibold">{{ "%.1f"|format(tick.volume_24h|float) }} BTC</p>
-      <p class="text-gray-600 text-xs mt-1">რამდენი ბიტქოინი იყიდა/გაიყიდა 24სთ-ში</p>
+    <p class="text-xs {% if up %}text-green-300{% else %}text-red-300{% endif %} mb-4">
+      {% if up %}
+        {{ name }} ბოლო 24 საათში <strong>გაძვირდა</strong>.
+      {% else %}
+        {{ name }} ბოლო 24 საათში <strong>გაიაფდა</strong>.
+      {% endif %}
+    </p>
+
+    <div class="grid grid-cols-3 gap-3 text-sm">
+      <div class="bg-gray-800 rounded-lg p-3">
+        <p class="text-gray-500 text-xs mb-1">დღის მაქს.</p>
+        <p class="text-green-400 font-semibold">${{ "%.0f"|format(tick.high_24h|float) }}</p>
+      </div>
+      <div class="bg-gray-800 rounded-lg p-3">
+        <p class="text-gray-500 text-xs mb-1">დღის მინ.</p>
+        <p class="text-red-400 font-semibold">${{ "%.0f"|format(tick.low_24h|float) }}</p>
+      </div>
+      <div class="bg-gray-800 rounded-lg p-3">
+        <p class="text-gray-500 text-xs mb-1">მოცულობა</p>
+        <p class="text-blue-400 font-semibold text-xs">{{ "%.1f"|format(tick.volume_24h|float) }} {{ unit }}</p>
+      </div>
+    </div>
+
+    {% set range_pct = ((tick.high_24h - tick.low_24h) / tick.low_24h * 100)|float %}
+    <div class="mt-3 bg-gray-800 rounded-lg p-2 text-xs text-gray-400">
+      <span class="text-gray-300 font-semibold">ვოლატილობა:</span>
+      {{ "%.2f"|format(range_pct) }}% —
+      {% if range_pct < 2 %}ბაზარი მშვიდია.
+      {% elif range_pct < 5 %}ჩვეულებრივი მოძრაობა.
+      {% else %}მაღალი ვოლატილობა — ყურადღება!{% endif %}
     </div>
 
   </div>
 
-  <!-- ვოლატილობის ახსნა -->
-  {% set range_pct = ((tick.high_24h - tick.low_24h) / tick.low_24h * 100)|float %}
-  <div class="mt-4 bg-gray-800 rounded-lg p-3 text-xs text-gray-400">
-    <span class="font-semibold text-gray-300">ვოლატილობა (დღის დიაპაზონი):</span>
-    {{ "%.2f"|format(range_pct) }}% —
-    {% if range_pct < 2 %}
-      ბაზარი მშვიდია, ფასი ნაკლებად იცვლება.
-    {% elif range_pct < 5 %}
-      ჩვეულებრივი მოძრაობა — ბიტქოინისთვის ნორმალურია.
-    {% else %}
-      მაღალი ვოლატილობა — ფასი ძლიერ იცვლება, ყურადღება!
-    {% endif %}
+  {% else %}
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">{{ name }} / დოლარი</h2>
+    <div class="flex items-center gap-3 text-gray-500">
+      <div class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
+      <p class="text-sm">WebSocket-ი უკავშირდება...</p>
+    </div>
   </div>
+  {% endif %}
 
-  <p class="text-xs text-gray-700 mt-3">განახლდება ყოველ 5 წამში • Binance WebSocket</p>
+{% endfor %}
 </div>
-
-{% else %}
-<div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
-  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">ბიტქოინი / დოლარი</h2>
-  <div class="flex items-center gap-3 text-gray-500">
-    <div class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
-    <p class="text-sm">ფასი იტვირთება — WebSocket სერვერთან კავშირი მყარდება...</p>
-  </div>
-  <p class="text-xs text-gray-700 mt-2">ეს ნიშნავს, რომ ბოტი Binance-ს სერვერს უკავშირდება პირდაპირ კავშირით (WebSocket), რომელიც ფასს ყოველ წამში განაახლებს.</p>
-</div>
-{% endif %}
