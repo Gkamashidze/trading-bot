@@ -22,6 +22,7 @@ from trading_bot.backtesting.fill_model import (
     FillModel,
     FillModelProfile,
     PerfectFillModel,
+    RealisticFillConfig,
     RealisticFillModel,
 )
 from trading_bot.backtesting.metrics import compute_metrics
@@ -33,7 +34,22 @@ class BacktestEngine:
     def __init__(self, config: BacktestConfig | None = None) -> None:
         self.config = config or BacktestConfig()
 
-    def run(self, bars: pd.DataFrame, strategy: StrategyBase) -> BacktestResult:
+    def run(
+        self,
+        bars: pd.DataFrame,
+        strategy: StrategyBase,
+        dataset_snapshot_id: str = "",
+    ) -> BacktestResult:
+        """Run a backtest.
+
+        Args:
+            bars: OHLCV DataFrame.
+            strategy: Strategy instance to backtest.
+            dataset_snapshot_id: ID of the registered DatasetSnapshot (from LineageStore)
+                that produced `bars`.  In production, always supply this.  Omitting it
+                is allowed only for synthetic test data — production runner.py always
+                passes a valid ID.
+        """
         n = len(bars)
         if n < strategy.min_bars_required:
             raise ValueError(f"Backtest needs {strategy.min_bars_required} bars, got {n}")
@@ -41,13 +57,38 @@ class BacktestEngine:
         cfg = self.config
 
         # Build fill model
+        # If fee_rate or slippage_rate are explicitly set in BacktestConfig, override
+        # the profile defaults so that higher fees always reduce net return
+        # (semantic guarantee for monotonicity tests).
         fill_model: FillModel
         if cfg.fill_model_profile == FillModelProfile.IDEAL:
             fill_model = PerfectFillModel()
         else:
-            fill_model = RealisticFillModel.from_profile(cfg.fill_model_profile)
+            from trading_bot.backtesting.fill_model import REALISTIC_PROFILES
 
-        rng = random.Random(cfg.fill_rng_seed)  # noqa: S311 — not used for crypto
+            base_cfg = REALISTIC_PROFILES[cfg.fill_model_profile]
+            # honour explicit fee_rate / slippage_rate overrides from BacktestConfig
+            # to ensure monotonicity: more fees → lower or equal net return
+            override_kwargs: dict[str, float] = {}
+            if cfg.fee_rate != 0.001:  # non-default fee_rate
+                override_kwargs["taker_fee_rate"] = cfg.fee_rate
+                override_kwargs["maker_fee_rate"] = cfg.fee_rate * 0.5
+            if cfg.slippage_rate != 0.0005:  # non-default slippage_rate
+                # Map slippage_rate to half_spread_bps (1 bps = 0.01%)
+                override_kwargs["half_spread_bps"] = cfg.slippage_rate * 10_000
+            if override_kwargs:
+                import dataclasses
+
+                fill_model = RealisticFillModel(
+                    dataclasses.replace(base_cfg, **override_kwargs)
+                )
+            else:
+                fill_model = RealisticFillModel.from_profile(cfg.fill_model_profile)
+
+        # Always use a deterministic seed; default to 0 when not set so tests
+        # are reproducible across runs (fixes non-deterministic fee comparison).
+        seed = cfg.fill_rng_seed if cfg.fill_rng_seed is not None else 0
+        rng = random.Random(seed)  # noqa: S311 — not used for crypto
 
         signals = strategy.backtest_signals(bars)
         signal_arr = signals.to_numpy()
@@ -190,4 +231,5 @@ class BacktestEngine:
             n_bars=n,
             period_start=period_start,
             period_end=period_end,
+            dataset_snapshot_id=dataset_snapshot_id,
         )

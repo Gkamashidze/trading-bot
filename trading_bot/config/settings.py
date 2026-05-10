@@ -299,6 +299,7 @@ def _load_settings() -> Settings:
         "time_sync",
         "trading",
         "market_context",
+        "capital_allocation",
     ):
         if key in yaml_defaults:
             nested_overrides[key] = yaml_defaults[key]

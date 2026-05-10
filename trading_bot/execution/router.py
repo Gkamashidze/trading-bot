@@ -46,6 +46,30 @@ _exchange = PaperExchange()
 _last_signal: dict[str, str] = {}
 
 
+def _record_reconciliation_rejection(
+    result: StrategyResult,
+    tracker: object,
+    reason: str,
+) -> None:
+    """Record an OMS rejection caused by reconciliation block."""
+    from trading_bot.oms.tracker import get_order_tracker
+
+    t = get_order_tracker()
+    t.record(
+        OrderState(
+            client_order_id=f"recon_block_{result.symbol}_{result.strategy_id}",
+            symbol=result.symbol,
+            exchange=ExchangeId.BINANCE,
+            side=OrderSide.BUY if result.signal == "BUY" else OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            requested_quantity=Decimal("0"),
+            status=OrderStatus.REJECTED,
+            reject_reason=reason,
+            strategy_id=result.strategy_id,
+        )
+    )
+
+
 async def route_signal(result: StrategyResult) -> None:
     """Route a single StrategyResult to the paper exchange.
 
@@ -68,6 +92,33 @@ async def route_signal(result: StrategyResult) -> None:
             drawdown_pct=f"{cb.last_drawdown_pct:.2%}",
         )
         return
+
+    # ── Reconciliation gate — block new orders if reconciler is critical ─────
+    from trading_bot.oms.reconciler import ReconciliationSeverity, get_reconciler
+
+    reconciler = get_reconciler()
+    if reconciler is not None:
+        if reconciler.orders_blocked:
+            log.error(
+                "router_reconciliation_block",
+                strategy=result.strategy_id,
+                signal=result.signal,
+                note="new orders blocked — critical reconciliation mismatch pending operator review",
+            )
+            tracker = get_order_tracker()
+            # Record the rejection so operators can see blocked orders in /open_orders
+            _record_reconciliation_rejection(result, tracker, "reconciliation_critical_block")
+            return
+        if reconciler.last_report is not None:
+            if reconciler.last_report.severity == ReconciliationSeverity.CRITICAL:
+                log.error(
+                    "router_reconciliation_critical_severity",
+                    strategy=result.strategy_id,
+                    signal=result.signal,
+                )
+                tracker = get_order_tracker()
+                _record_reconciliation_rejection(result, tracker, "reconciliation_severity_critical")
+                return
 
     signal_key = f"{result.symbol}:{result.strategy_id}"
     prev = _last_signal.get(signal_key, "HOLD")
@@ -186,25 +237,58 @@ async def route_signal(result: StrategyResult) -> None:
             return
 
     # ── Execute on paper exchange ────────────────────────────────────────────
+    signal_time = datetime.now(UTC)
     try:
         fill_resp = await _exchange.place_order(order)
         actual_price = Decimal(fill_resp["fill_price"])
-        portfolio.apply_fill(order, actual_price)
-        tracker.record(
-            OrderState(
-                client_order_id=order.client_order_id,
-                exchange_order_id=fill_resp.get("exchange_order_id", ""),
-                symbol=order.symbol,
-                exchange=order.exchange,
-                side=order.side,
-                order_type=order.order_type,
-                requested_quantity=order.quantity,
-                filled_quantity=order.quantity,
-                average_fill_price=actual_price,
-                status=OrderStatus.FILLED,
-                strategy_id=order.strategy_id,
-            )
+        actual_filled_qty = Decimal(
+            str(fill_resp.get("filled_quantity", order.quantity))
         )
+        portfolio.apply_fill(order, actual_price)
+
+        order_state = OrderState(
+            client_order_id=order.client_order_id,
+            exchange_order_id=fill_resp.get("exchange_order_id", ""),
+            symbol=order.symbol,
+            exchange=order.exchange,
+            side=order.side,
+            order_type=order.order_type,
+            requested_quantity=order.quantity,
+            filled_quantity=actual_filled_qty,
+            average_fill_price=actual_price,
+            status=OrderStatus.FILLED,
+            strategy_id=order.strategy_id,
+        )
+        tracker.record(order_state)
+
+        # ── TCA: record fill quality vs signal price ─────────────────────
+        fill_latency_ms = (datetime.now(UTC) - signal_time).total_seconds() * 1000
+        from trading_bot.tca.tracker import OrderOutcome, get_tca_tracker
+
+        get_tca_tracker().record(
+            order_id=order.client_order_id,
+            symbol=order.symbol,
+            side=order.side.value,
+            signal_price=float(fill_price),
+            fill_price=float(actual_price),
+            quantity=float(actual_filled_qty),
+            latency_ms=fill_latency_ms,
+            outcome=OrderOutcome.FILLED,
+        )
+
+        # ── Accounting: record trade lot + FIFO PnL ───────────────────────
+        from trading_bot.accounting.ledger import get_accounting_ledger
+
+        fee_usdt = float(actual_filled_qty) * float(actual_price) * 0.001  # taker 0.1%
+        get_accounting_ledger().record_trade(
+            symbol=order.symbol,
+            side=order.side.value,
+            quantity=actual_filled_qty,
+            price=actual_price,
+            fee_usdt=fee_usdt,
+            order_id=order.client_order_id,
+        )
+
     except Exception as e:
         log.error("router_execution_error", error=str(e), symbol=order.symbol)
 

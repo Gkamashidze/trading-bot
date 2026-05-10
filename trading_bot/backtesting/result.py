@@ -49,3 +49,7 @@ class BacktestResult:
     n_bars: int
     period_start: str
     period_end: str
+    # Data lineage: snapshot ID that was used to produce this backtest result.
+    # Must be a valid ID registered in LineageStore or equivalent.
+    # Empty string only when lineage is explicitly waived (e.g. synthetic test data).
+    dataset_snapshot_id: str = ""

@@ -20,7 +20,11 @@ from decimal import Decimal
 from trading_bot.config import get_settings
 from trading_bot.core.models import AssetClass, OrderRequest, OrderSide, PortfolioSnapshot
 from trading_bot.observability.logging import get_logger
-from trading_bot.risk.capital_policy import CapitalPolicyConfig, CapitalPolicyEngine
+from trading_bot.risk.capital_policy import (
+    CapitalPolicyConfig,
+    CapitalPolicyEngine,
+    get_capital_policy_engine,
+)
 
 log = get_logger(__name__)
 
@@ -40,10 +44,28 @@ class RiskEngine:
     2. Capital allocation policy (strategy/asset/asset-class caps, loss budgets)
 
     Settings are read on each call so runtime changes take effect immediately.
+
+    The capital_policy parameter is used only when constructing a *non-singleton* engine
+    (e.g. in tests). In production the module-level singleton from
+    get_capital_policy_engine() is shared with the Telegram operator console so that
+    /pause, /resume, /reduce_risk commands immediately affect pre_trade_check().
     """
 
-    def __init__(self, capital_policy: CapitalPolicyConfig | None = None) -> None:
-        self._capital_policy_engine = CapitalPolicyEngine(capital_policy)
+    def __init__(
+        self,
+        capital_policy: CapitalPolicyConfig | None = None,
+        capital_policy_engine: CapitalPolicyEngine | None = None,
+    ) -> None:
+        if capital_policy_engine is not None:
+            # Caller explicitly provides the engine (e.g. tests, or production wiring)
+            self._capital_policy_engine = capital_policy_engine
+        elif capital_policy is not None:
+            # Legacy: build a private engine from a config (tests only)
+            self._capital_policy_engine = CapitalPolicyEngine(capital_policy)
+        else:
+            # Production default: share the module-level singleton so Telegram
+            # operator commands immediately affect all pre_trade_check() calls.
+            self._capital_policy_engine = get_capital_policy_engine()
 
     def pre_trade_check(
         self,
@@ -108,6 +130,7 @@ class RiskEngine:
             snapshot=snapshot,
             asset_class=asset_class,
             weekly_pnl_pct=weekly_pnl_pct,
+            fill_price=fill_price,
         )
         if not cap_decision.approved:
             return RiskDecision(False, f"capital_policy: {cap_decision.reason}")

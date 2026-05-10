@@ -33,8 +33,10 @@ The run() loop exits automatically when shutdown is requested.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -47,19 +49,44 @@ log = get_logger(__name__)
 _TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 _POLL_TIMEOUT = 30  # long-poll timeout in seconds
 
+# State-changing commands that require audit logging and idempotency tracking
+_STATE_CHANGING_COMMANDS = frozenset({"kill", "pause", "resume", "reduce_risk", "cancel_all", "ack"})
+
+# In-memory idempotency window for operator commands (60s dedup window)
+# Key: (command, args_str) → last execution timestamp
+_command_dedup: dict[str, float] = {}
+_COMMAND_DEDUP_WINDOW_S = 60.0
+
+
+def _make_operator_idempotency_key(
+    command: str, args: list[str], chat_id: int
+) -> str:
+    """Deterministic idempotency key for an operator command (60s window)."""
+    # Window bucket = floor(now / 60s) — same command within 60s = same key
+    window = int(time.time() / _COMMAND_DEDUP_WINDOW_S)
+    raw = f"{chat_id}:{command}:{':'.join(args)}:{window}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
 
 class TelegramCommandHandler:
     """Poll Telegram getUpdates and handle operator commands."""
 
-    def __init__(self, token: str, authorized_chat_id: int, pool: Any) -> None:
+    def __init__(
+        self,
+        token: str,
+        authorized_chat_id: int,
+        pool: Any,
+        audit_log: Any = None,
+    ) -> None:
         self._token = token
         self._authorized_chat_id = authorized_chat_id
         self._pool = pool
+        self._audit_log = audit_log  # AuditLogInterface | None
         self._offset = 0
         self._start_time = time.time()
 
     @classmethod
-    def from_env_optional(cls, pool: Any) -> TelegramCommandHandler | None:
+    def from_env_optional(cls, pool: Any, audit_log: Any = None) -> TelegramCommandHandler | None:
         """Return None if TELEGRAM_BOT_TOKEN or TELEGRAM_ALERT_CHAT_ID is missing."""
         token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         chat_id_str = os.environ.get("TELEGRAM_ALERT_CHAT_ID", "")
@@ -70,7 +97,7 @@ class TelegramCommandHandler:
         except ValueError:
             log.warning("telegram_command_handler_invalid_chat_id", raw=chat_id_str)
             return None
-        return cls(token=token, authorized_chat_id=chat_id, pool=pool)
+        return cls(token=token, authorized_chat_id=chat_id, pool=pool, audit_log=audit_log)
 
     async def run(self) -> None:
         """Long-poll loop — exits when shutdown is requested."""
@@ -120,6 +147,27 @@ class TelegramCommandHandler:
         command: str,
         args: list[str],
     ) -> None:
+        # ── Idempotency dedup for state-changing commands ─────────────────────
+        if command in _STATE_CHANGING_COMMANDS:
+            idem_key = _make_operator_idempotency_key(command, args, chat_id)
+            last_exec = _command_dedup.get(idem_key)
+            now = time.time()
+            if last_exec is not None and (now - last_exec) < _COMMAND_DEDUP_WINDOW_S:
+                log.info(
+                    "operator_command_dedup_skipped",
+                    command=command,
+                    args=args,
+                    chat_id=chat_id,
+                    age_seconds=now - last_exec,
+                )
+                await self._send(
+                    client,
+                    chat_id,
+                    f"⚠️ /{command} უკვე შესრულდა {int(now - last_exec)}წ. წინ — duplicate ignored",
+                )
+                return
+            _command_dedup[idem_key] = now
+
         # Commands that accept optional arguments are dispatched with args
         arg_commands = {
             "pause": self._cmd_pause,
@@ -149,6 +197,31 @@ class TelegramCommandHandler:
             )
             return
         await handler(client, chat_id)
+
+    async def _audit_command(
+        self,
+        command: str,
+        args: list[str],
+        chat_id: int,
+        result: str = "executed",
+    ) -> None:
+        """Append a command event to the audit log if available."""
+        if self._audit_log is None:
+            return
+        try:
+            await self._audit_log.append(
+                event_type=f"operator.telegram.{command}",
+                payload={
+                    "command": command,
+                    "args": args,
+                    "chat_id": chat_id,
+                    "result": result,
+                    "executed_at": datetime.now(UTC).isoformat(),
+                },
+                actor=f"telegram:{chat_id}",
+            )
+        except Exception as exc:
+            log.warning("operator_audit_log_failed", command=command, error=str(exc))
 
     async def _cmd_status(self, client: httpx.AsyncClient, chat_id: int) -> None:
         uptime = int(time.time() - self._start_time)
@@ -218,6 +291,7 @@ class TelegramCommandHandler:
             enabled=enabled,
             chat_id=chat_id,
         )
+        await self._audit_command("kill", [], chat_id, result=f"paper_trading_enabled={enabled}")
         await self._send(client, chat_id, f"ქაღალდური ვაჭრობა: {status}")
 
     async def _cmd_exposure(self, client: httpx.AsyncClient, chat_id: int) -> None:
@@ -284,6 +358,9 @@ class TelegramCommandHandler:
             chat_id=chat_id,
             order_count=len(orders),
         )
+        await self._audit_command(
+            "cancel_all", [], chat_id, result=f"cancelled_{len(orders)}_orders"
+        )
         msg = f"Paper trading-ში {len(orders)} ორდერის გაუქმება — ბირჟაზე real orders-ს ეს არ ეხება"
         await self._send(client, chat_id, msg)
 
@@ -304,6 +381,7 @@ class TelegramCommandHandler:
             strategy_id=strategy_id,
             chat_id=chat_id,
         )
+        await self._audit_command("pause", [strategy_id], chat_id, result="paused")
         await self._send(client, chat_id, f"⏸ სტრატეგია დაპაუზებულია: `{strategy_id}`")
 
     async def _cmd_resume(self, client: httpx.AsyncClient, chat_id: int, args: list[str]) -> None:
@@ -323,6 +401,7 @@ class TelegramCommandHandler:
             strategy_id=strategy_id,
             chat_id=chat_id,
         )
+        await self._audit_command("resume", [strategy_id], chat_id, result="active")
         await self._send(client, chat_id, f"▶️ სტრატეგია გააქტიურდა: `{strategy_id}`")
 
     async def _cmd_reduce_risk(
@@ -344,6 +423,7 @@ class TelegramCommandHandler:
             strategy_id=strategy_id,
             chat_id=chat_id,
         )
+        await self._audit_command("reduce_risk", [strategy_id], chat_id, result="reduced_risk")
         await self._send(client, chat_id, f"⚠️ REDUCED_RISK რეჟიმი: `{strategy_id}`")
 
     async def _cmd_ack(self, client: httpx.AsyncClient, chat_id: int, args: list[str]) -> None:
@@ -356,6 +436,7 @@ class TelegramCommandHandler:
         monitor = get_slo_monitor()
         try:
             alert = monitor.acknowledge(alert_id, operator=f"telegram:{chat_id}")
+            await self._audit_command("ack", [alert_id], chat_id, result=f"acked_{alert.sli}")
             await self._send(
                 client, chat_id, f"✅ Alert დასტურდება: `{alert.sli}` ({alert.severity})"
             )

@@ -7,7 +7,7 @@ Live trading remains hardcoded false until all criteria pass AND an operator
 explicitly calls record_approval().
 
 Typical flow:
-    gate = GoLiveGate(audit_log=audit_log, exchange=exchange, ...)
+    gate = GoLiveGate(audit_log=audit_log, exchange=exchange, pool=pool, ...)
     report = await gate.evaluate()
     print(report.summary())
     # If report.ready is False, fix the blocking items and re-evaluate.
@@ -17,10 +17,19 @@ Typical flow:
     )
     report2 = await gate.evaluate()
     assert report2.ready
+
+Persistence:
+    Approvals are written to the go_live_approvals Postgres table (migration 0004).
+    On restart, GoLiveGate.load_latest_approval() recovers the most recent valid
+    approval so the gate survives process restarts without losing approval state.
+    The approval record includes: operator, timestamp, rollback_confirmed,
+    risk_sign_off, checklist_snapshot, and a correlation_id (idempotency key).
 """
 
 from __future__ import annotations
 
+import json
+import uuid
 from typing import Any
 
 from trading_bot.config import get_settings
@@ -46,6 +55,7 @@ class GoLiveGate:
     """Evaluates go-live readiness and records operator approvals.
 
     All evaluation results are logged to the audit trail.
+    Approvals are persisted to Postgres so restarts do not lose approval state.
     The gate never mutates the live_trading_enabled flag itself —
     that is the operator's responsibility after the report confirms ready=True.
     """
@@ -55,6 +65,7 @@ class GoLiveGate:
         audit_log: AuditLogInterface,
         exchange: ExchangeInterface,
         feature_flags: FeatureFlagStoreInterface | None = None,
+        pool: Any = None,
         reconciler_last_run_clean: bool = False,
         paper_trading_days: int = 0,
         paper_win_rate: float | None = None,
@@ -67,6 +78,7 @@ class GoLiveGate:
         self._audit_log = audit_log
         self._exchange = exchange
         self._feature_flags = feature_flags
+        self._pool = pool
         self._reconciler_last_run_clean = reconciler_last_run_clean
         self._paper_trading_days = paper_trading_days
         self._paper_win_rate = paper_win_rate
@@ -78,6 +90,64 @@ class GoLiveGate:
         self._approval: ApprovalEvent | None = None
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    async def load_latest_approval(self) -> ApprovalEvent | None:
+        """Recover the latest valid approval from Postgres (call at startup).
+
+        Returns the ApprovalEvent and also sets self._approval so evaluate()
+        will include it in the report. Returns None if no approval exists or
+        DB is unavailable.
+        """
+        if self._pool is None:
+            return None
+
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT approval_id, operator, approved, comment, approved_at,
+                           rollback_plan_confirmed, risk_sign_off_by, checklist_snapshot,
+                           correlation_id
+                    FROM go_live_approvals
+                    WHERE approved = TRUE
+                    ORDER BY approved_at DESC
+                    LIMIT 1
+                    """,
+                )
+        except Exception as exc:
+            log.warning("go_live_approval_load_failed", error=str(exc))
+            return None
+
+        if row is None:
+            return None
+
+        try:
+            snapshot = (
+                json.loads(row["checklist_snapshot"])
+                if isinstance(row["checklist_snapshot"], str)
+                else dict(row["checklist_snapshot"])
+            )
+            approval = ApprovalEvent(
+                approval_id=str(row["approval_id"]),
+                operator=row["operator"],
+                approved=bool(row["approved"]),
+                comment=row["comment"] or "",
+                approved_at=row["approved_at"],
+                rollback_plan_confirmed=bool(row["rollback_plan_confirmed"]),
+                risk_sign_off_by=row["risk_sign_off_by"] or "",
+                checklist_snapshot=snapshot,
+            )
+            self._approval = approval
+            log.info(
+                "go_live_approval_recovered",
+                approval_id=str(row["approval_id"]),
+                operator=row["operator"],
+                approved_at=row["approved_at"].isoformat(),
+            )
+            return approval
+        except Exception as exc:
+            log.warning("go_live_approval_deserialise_failed", error=str(exc))
+            return None
 
     async def evaluate(self) -> ReadinessReport:
         """Run all criteria checks and return a ReadinessReport.
@@ -130,15 +200,26 @@ class GoLiveGate:
         comment: str = "",
         rollback_plan_confirmed: bool = False,
         risk_sign_off_by: str = "",
+        correlation_id: str = "",
     ) -> ApprovalEvent:
-        """Record operator approval. Persisted to audit log.
+        """Record operator approval. Persisted to audit log AND Postgres.
 
         Approval does NOT enable live trading — it is one input to evaluate().
         The operator must still manually flip the feature flag after the gate
         confirms ready=True.
+
+        Args:
+            operator: Name/identifier of the approving operator (required).
+            comment: Optional comment.
+            rollback_plan_confirmed: Operator confirms rollback plan exists.
+            risk_sign_off_by: Name of the risk reviewer (defaults to self._risk_sign_off_by).
+            correlation_id: Idempotency key for this approval; generated if not provided.
         """
         if not operator:
             raise ValueError("operator name is required for go-live approval")
+
+        if not correlation_id:
+            correlation_id = str(uuid.uuid4())
 
         # Capture current report state as snapshot
         report = await self.evaluate()
@@ -150,16 +231,22 @@ class GoLiveGate:
             ],
         }
 
+        effective_risk_sign_off = risk_sign_off_by or self._risk_sign_off_by
+
         approval = ApprovalEvent(
             operator=operator,
             approved=True,
             comment=comment,
             rollback_plan_confirmed=rollback_plan_confirmed,
-            risk_sign_off_by=risk_sign_off_by or self._risk_sign_off_by,
+            risk_sign_off_by=effective_risk_sign_off,
             checklist_snapshot=snapshot,
         )
         self._approval = approval
 
+        # ── Persist to Postgres ───────────────────────────────────────────────
+        await self._persist_approval(approval, correlation_id)
+
+        # ── Append to audit log ───────────────────────────────────────────────
         await self._audit_log.append(
             event_type="go_live.operator_approved",
             payload={
@@ -170,6 +257,7 @@ class GoLiveGate:
                 "risk_sign_off_by": approval.risk_sign_off_by,
                 "checklist_ready": report.ready,
             },
+            correlation_id=correlation_id,
             actor=operator,
         )
 
@@ -177,8 +265,53 @@ class GoLiveGate:
             "go_live_approval_recorded",
             operator=operator,
             checklist_ready=report.ready,
+            correlation_id=correlation_id,
         )
         return approval
+
+    # ── Persistence helpers ───────────────────────────────────────────────────
+
+    async def _persist_approval(self, approval: ApprovalEvent, correlation_id: str) -> None:
+        """Write approval to go_live_approvals table.  No-op if pool is None."""
+        if self._pool is None:
+            log.warning(
+                "go_live_approval_no_pool",
+                note="approval not persisted to DB — pool is None",
+            )
+            return
+
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO go_live_approvals
+                        (approval_id, operator, approved, comment, approved_at,
+                         rollback_plan_confirmed, risk_sign_off_by, checklist_snapshot,
+                         correlation_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (approval_id) DO NOTHING
+                    """,
+                    uuid.UUID(approval.approval_id),
+                    approval.operator,
+                    approval.approved,
+                    approval.comment,
+                    approval.approved_at,
+                    approval.rollback_plan_confirmed,
+                    approval.risk_sign_off_by,
+                    json.dumps(approval.checklist_snapshot),
+                    correlation_id,
+                )
+            log.info(
+                "go_live_approval_persisted",
+                approval_id=approval.approval_id,
+                operator=approval.operator,
+            )
+        except Exception as exc:
+            log.error(
+                "go_live_approval_persist_failed",
+                approval_id=approval.approval_id,
+                error=str(exc),
+            )
 
     # ── Criterion evaluators ──────────────────────────────────────────────────
 

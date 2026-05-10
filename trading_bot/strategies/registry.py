@@ -5,7 +5,8 @@ history, and expiry.  The promotion pipeline must call
 `require_valid_entry()` before advancing a strategy to the next tier.
 
 Design rules:
-- Registry is module-level (in-memory for now, DB persistence optional).
+- Registry is optionally Postgres-backed: pass pool= to StrategyRegistry().
+- Without a pool, operates in-memory (suitable for tests).
 - Entries are immutable; updates create new versions via `update_entry()`.
 - Approval history is append-only — never mutate past records.
 """
@@ -117,14 +118,16 @@ def hash_file(path: str) -> str:
 
 
 class StrategyRegistry:
-    """Thread-safe (GIL-protected) in-memory registry of strategy entries.
+    """Postgres-backed (optionally in-memory) registry of strategy entries.
 
+    Pass pool= for persistent storage.  Without a pool, operates in-memory.
     All mutating methods return the updated entry so callers can inspect the
     result without an extra ``get()`` call.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, pool: object = None) -> None:
         self._entries: dict[str, StrategyRegistryEntry] = {}
+        self._pool = pool  # asyncpg Pool | None
 
     def register(self, entry: StrategyRegistryEntry) -> StrategyRegistryEntry:
         """Add or replace the entry for entry.strategy_id."""
@@ -186,6 +189,133 @@ class StrategyRegistry:
             raise RegistryError(
                 f"strategy '{strategy_id}' is not approved (status={entry.promotion_status})"
             )
+
+    # ── DB persistence ────────────────────────────────────────────────────────
+
+    async def _persist_entry(self, entry: StrategyRegistryEntry) -> None:
+        """Upsert strategy entry to strategy_registry table."""
+        if self._pool is None:
+            return
+        try:
+            approval_history_json = json.dumps(
+                [
+                    {
+                        "approver": r.approver,
+                        "decision": r.decision,
+                        "recorded_at": r.recorded_at.isoformat(),
+                        "note": r.note,
+                    }
+                    for r in entry.approval_history
+                ]
+            )
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO strategy_registry (
+                        strategy_id, version, owner, params_hash, code_hash,
+                        research_dataset_hash, backtest_result_id,
+                        promotion_status, registered_at,
+                        expiry_date, review_date, approval_history
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    ON CONFLICT (strategy_id, version) DO UPDATE SET
+                        owner                 = EXCLUDED.owner,
+                        params_hash           = EXCLUDED.params_hash,
+                        code_hash             = EXCLUDED.code_hash,
+                        research_dataset_hash = EXCLUDED.research_dataset_hash,
+                        backtest_result_id    = EXCLUDED.backtest_result_id,
+                        promotion_status      = EXCLUDED.promotion_status,
+                        expiry_date           = EXCLUDED.expiry_date,
+                        review_date           = EXCLUDED.review_date,
+                        approval_history      = EXCLUDED.approval_history
+                    """,
+                    entry.strategy_id,
+                    entry.version,
+                    entry.owner,
+                    entry.params_hash,
+                    entry.code_hash,
+                    entry.research_dataset_hash,
+                    entry.backtest_result_id,
+                    entry.promotion_status,
+                    entry.registered_at,
+                    entry.expiry_date,
+                    entry.review_date,
+                    approval_history_json,
+                )
+        except Exception as exc:
+            import logging as _logging
+
+            _logging.getLogger(__name__).error(
+                "strategy_registry_persist_failed strategy_id=%s error=%s",
+                entry.strategy_id,
+                exc,
+            )
+
+    async def load_from_db(self) -> int:
+        """Load strategy entries from Postgres.  Returns count loaded.  No-op if no pool."""
+        if self._pool is None:
+            return 0
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT strategy_id, version, owner, params_hash, code_hash,
+                           research_dataset_hash, backtest_result_id,
+                           promotion_status, registered_at,
+                           expiry_date, review_date, approval_history
+                    FROM strategy_registry
+                    ORDER BY registered_at ASC
+                    """
+                )
+        except Exception as exc:
+            import logging as _logging
+
+            _logging.getLogger(__name__).error(
+                "strategy_registry_load_failed error=%s", exc
+            )
+            return 0
+
+        count = 0
+        for row in rows:
+            try:
+                history_raw = (
+                    json.loads(row["approval_history"])
+                    if isinstance(row["approval_history"], str)
+                    else list(row["approval_history"])
+                )
+                history = [
+                    ApprovalRecord(
+                        approver=r["approver"],
+                        decision=r["decision"],
+                        recorded_at=datetime.fromisoformat(r["recorded_at"]),
+                        note=r.get("note", ""),
+                    )
+                    for r in history_raw
+                ]
+                entry = StrategyRegistryEntry(
+                    strategy_id=row["strategy_id"],
+                    version=row["version"],
+                    owner=row["owner"] or "unassigned",
+                    params_hash=row["params_hash"] or "",
+                    code_hash=row["code_hash"] or "",
+                    research_dataset_hash=row["research_dataset_hash"] or "",
+                    backtest_result_id=row["backtest_result_id"] or "",
+                    promotion_status=row["promotion_status"],
+                    registered_at=row["registered_at"],
+                    expiry_date=row["expiry_date"],
+                    review_date=row["review_date"],
+                    approval_history=history,
+                )
+                self._entries[entry.strategy_id] = entry
+                count += 1
+            except Exception as exc:
+                import logging as _logging
+
+                _logging.getLogger(__name__).warning(
+                    "strategy_registry_row_parse_failed strategy_id=%s error=%s",
+                    row.get("strategy_id", "?"),
+                    exc,
+                )
+        return count
 
 
 class RegistryError(Exception):

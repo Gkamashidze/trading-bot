@@ -94,13 +94,18 @@ class ExperimentArtifact:
 
 
 class ExperimentRegistry:
-    """In-memory store of experiment artifacts.
+    """Store of experiment artifacts backed by an optional Postgres pool.
+
+    Without a pool, operates as an in-memory store (suitable for tests).
+    With a pool, all mutations are persisted to the ``experiments`` table and
+    the registry can be reloaded after a process restart via ``load_from_db()``.
 
     Experiments are append-only; approval/archival create updated copies.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, pool: object = None) -> None:
         self._store: dict[str, ExperimentArtifact] = {}
+        self._pool = pool  # asyncpg Pool | None
 
     def create(
         self,
@@ -131,6 +136,14 @@ class ExperimentRegistry:
             strategy_id=strategy_id,
             fingerprint=artifact.fingerprint[:12],
         )
+        # Fire-and-forget persistence — import asyncio to schedule if in async context
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._persist(artifact))
+        except RuntimeError:
+            pass  # Not in async context — caller must call _persist() explicitly
         return artifact
 
     def approve(self, experiment_id: str, approved_by: str) -> ExperimentArtifact:
@@ -155,6 +168,13 @@ class ExperimentRegistry:
         )
         self._store[experiment_id] = updated
         log.info("experiment_approved", experiment_id=experiment_id, approved_by=approved_by)
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._persist(updated))
+        except RuntimeError:
+            pass
         return updated
 
     def archive(self, experiment_id: str) -> ExperimentArtifact:
@@ -176,6 +196,13 @@ class ExperimentRegistry:
         )
         self._store[experiment_id] = updated
         log.info("experiment_archived", experiment_id=experiment_id)
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._persist(updated))
+        except RuntimeError:
+            pass
         return updated
 
     def get(self, experiment_id: str) -> ExperimentArtifact | None:
@@ -202,6 +229,109 @@ class ExperimentRegistry:
 
     def __len__(self) -> int:
         return len(self._store)
+
+    # ── DB persistence ────────────────────────────────────────────────────────
+
+    async def _persist(self, artifact: ExperimentArtifact) -> None:
+        """Upsert artifact to Postgres experiments table."""
+        if self._pool is None:
+            return
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO experiments (
+                        experiment_id, strategy_id, dataset_snapshot_ids,
+                        params_hash, code_hash, seed, metrics,
+                        status, approved_by, approved_at, notes, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (experiment_id) DO UPDATE SET
+                        status       = EXCLUDED.status,
+                        approved_by  = EXCLUDED.approved_by,
+                        approved_at  = EXCLUDED.approved_at,
+                        metrics      = EXCLUDED.metrics,
+                        notes        = EXCLUDED.notes
+                    """,
+                    artifact.experiment_id,
+                    artifact.strategy_id,
+                    json.dumps(list(artifact.dataset_snapshot_ids)),
+                    artifact.params_hash,
+                    artifact.code_hash,
+                    artifact.seed,
+                    json.dumps(artifact.metrics),
+                    str(artifact.status),
+                    artifact.approved_by,
+                    artifact.approved_at,
+                    artifact.notes,
+                    artifact.created_at,
+                )
+        except Exception as exc:
+            log.error(
+                "experiment_registry_persist_failed",
+                experiment_id=artifact.experiment_id,
+                error=str(exc),
+            )
+
+    async def load_from_db(self) -> int:
+        """Load all experiments from Postgres into in-memory store.
+
+        Returns the number of experiments loaded.  No-op if pool is None.
+        """
+        if self._pool is None:
+            return 0
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT experiment_id, strategy_id, dataset_snapshot_ids,
+                           params_hash, code_hash, seed, metrics,
+                           status, approved_by, approved_at, notes, created_at
+                    FROM experiments
+                    ORDER BY created_at ASC
+                    """
+                )
+        except Exception as exc:
+            log.error("experiment_registry_load_failed", error=str(exc))
+            return 0
+
+        count = 0
+        for row in rows:
+            try:
+                snapshot_ids = (
+                    json.loads(row["dataset_snapshot_ids"])
+                    if isinstance(row["dataset_snapshot_ids"], str)
+                    else list(row["dataset_snapshot_ids"])
+                )
+                metrics = (
+                    json.loads(row["metrics"])
+                    if isinstance(row["metrics"], str)
+                    else dict(row["metrics"])
+                )
+                artifact = ExperimentArtifact(
+                    experiment_id=str(row["experiment_id"]),
+                    strategy_id=row["strategy_id"],
+                    dataset_snapshot_ids=tuple(sorted(snapshot_ids)),
+                    params_hash=row["params_hash"],
+                    code_hash=row["code_hash"],
+                    seed=row["seed"],
+                    metrics=metrics,
+                    created_at=row["created_at"],
+                    status=ExperimentStatus(row["status"]),
+                    approved_by=row["approved_by"] or "",
+                    approved_at=row["approved_at"],
+                    notes=row["notes"] or "",
+                )
+                self._store[artifact.experiment_id] = artifact
+                count += 1
+            except Exception as exc:
+                log.warning(
+                    "experiment_registry_row_parse_failed",
+                    experiment_id=str(row.get("experiment_id", "?")),
+                    error=str(exc),
+                )
+
+        log.info("experiment_registry_loaded", count=count)
+        return count
 
 
 # ---------------------------------------------------------------------------
