@@ -119,9 +119,7 @@ class TestOrderTrackerLoadRecent:
 
     async def test_load_recent_db_failure_does_not_crash(self) -> None:
         pool = MagicMock()
-        pool.acquire.return_value.__aenter__ = AsyncMock(
-            side_effect=Exception("DB timeout")
-        )
+        pool.acquire.return_value.__aenter__ = AsyncMock(side_effect=Exception("DB timeout"))
         pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         tracker = OrderTracker()
         tracker.set_pool(pool)

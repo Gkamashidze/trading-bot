@@ -101,9 +101,7 @@ class TestFeatureFlagStoreIsEnabled:
 
     async def test_db_failure_falls_back_to_yaml(self) -> None:
         pool = MagicMock()
-        pool.acquire.return_value.__aenter__ = AsyncMock(
-            side_effect=Exception("DB down")
-        )
+        pool.acquire.return_value.__aenter__ = AsyncMock(side_effect=Exception("DB down"))
         pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         store = FeatureFlagStore(pool)
 
@@ -113,9 +111,7 @@ class TestFeatureFlagStoreIsEnabled:
 
     async def test_safety_critical_flag_defaults_false_on_db_failure(self) -> None:
         pool = MagicMock()
-        pool.acquire.return_value.__aenter__ = AsyncMock(
-            side_effect=Exception("DB down")
-        )
+        pool.acquire.return_value.__aenter__ = AsyncMock(side_effect=Exception("DB down"))
         pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
         store = FeatureFlagStore(pool)
 
