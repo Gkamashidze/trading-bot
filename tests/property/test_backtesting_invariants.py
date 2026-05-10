@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 
 from trading_bot.backtesting.config import BacktestConfig
 from trading_bot.backtesting.engine import BacktestEngine
+from trading_bot.backtesting.fill_model import FillModelProfile
 from trading_bot.backtesting.metrics import compute_metrics
 from trading_bot.strategies.sma_crossover import SmaCrossoverStrategy
 
@@ -49,7 +50,14 @@ def test_equity_never_negative(closes: list[float], fee_rate: float, slippage: f
     strat = SmaCrossoverStrategy(fast=3, slow=5)
     assume(len(bars) >= strat.min_bars_required)
 
-    cfg = BacktestConfig(fee_rate=fee_rate, slippage_rate=slippage)
+    # Use IDEAL fill model: fee_rate/slippage_rate are BacktestConfig legacy params
+    # that only take effect with the old simple engine path (REALISTIC ignores them).
+    cfg = BacktestConfig(
+        fee_rate=fee_rate,
+        slippage_rate=slippage,
+        fill_model_profile=FillModelProfile.IDEAL,
+        fill_rng_seed=0,
+    )
     engine = BacktestEngine(cfg)
     result = engine.run(bars, strat)
     assert (result.equity_curve >= 0).all()

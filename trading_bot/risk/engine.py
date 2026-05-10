@@ -7,6 +7,9 @@ Circuit-breaker tiers (from base.yaml / RiskSettings):
   tier1_daily_drawdown_pct (5%)  → pause new positions
   tier2_daily_drawdown_pct (10%) → full halt
   tier3_daily_drawdown_pct (15%) → emergency (future: auto-liquidation)
+
+Capital policy (CapitalPolicyEngine) is evaluated after circuit breakers.
+Both must approve for an order to proceed.
 """
 
 from __future__ import annotations
@@ -15,8 +18,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from trading_bot.config import get_settings
-from trading_bot.core.models import OrderRequest, OrderSide, PortfolioSnapshot
+from trading_bot.core.models import AssetClass, OrderRequest, OrderSide, PortfolioSnapshot
 from trading_bot.observability.logging import get_logger
+from trading_bot.risk.capital_policy import CapitalPolicyConfig, CapitalPolicyEngine
 
 log = get_logger(__name__)
 
@@ -31,15 +35,23 @@ class RiskDecision:
 class RiskEngine:
     """Stateless pre-trade risk gate.
 
-    Settings are read on each call so runtime changes (e.g. operator
-    tightening limits) take effect immediately without a restart.
+    Runs two layers of checks:
+    1. Circuit breakers (drawdown tiers, cash floor, single-asset concentration)
+    2. Capital allocation policy (strategy/asset/asset-class caps, loss budgets)
+
+    Settings are read on each call so runtime changes take effect immediately.
     """
+
+    def __init__(self, capital_policy: CapitalPolicyConfig | None = None) -> None:
+        self._capital_policy_engine = CapitalPolicyEngine(capital_policy)
 
     def pre_trade_check(
         self,
         order: OrderRequest,
         snapshot: PortfolioSnapshot,
         fill_price: Decimal,
+        asset_class: AssetClass = AssetClass.CRYPTO,
+        weekly_pnl_pct: float = 0.0,
     ) -> RiskDecision:
         risk = get_settings().risk
         equity = snapshot.total_equity
@@ -89,6 +101,16 @@ class RiskEngine:
                     False,
                     f"{order.symbol} concentration {concentration:.1%} > limit {limit:.0%}",
                 )
+
+        # ── Capital allocation policy ────────────────────────────────────────
+        cap_decision = self._capital_policy_engine.check(
+            order=order,
+            snapshot=snapshot,
+            asset_class=asset_class,
+            weekly_pnl_pct=weekly_pnl_pct,
+        )
+        if not cap_decision.approved:
+            return RiskDecision(False, f"capital_policy: {cap_decision.reason}")
 
         log.debug("risk_approved", symbol=order.symbol, side=order.side)
         return RiskDecision(True, "")

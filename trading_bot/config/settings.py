@@ -152,6 +152,18 @@ class DataStorageSettings(BaseSettings):
     raw_path: str = Field(default="data/raw", alias="DATA_PATH")
 
 
+class CapitalAllocationSettings(BaseSettings):
+    """Capital governance limits — loaded from base.yaml / environment overrides."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    max_capital_per_strategy_pct: float = 0.30
+    max_capital_per_asset_pct: float = 0.20
+    daily_loss_budget_pct: float = 0.03
+    weekly_loss_budget_pct: float = 0.07
+    max_correlated_exposure_pct: float = 0.50
+
+
 class MarketContextSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -218,6 +230,7 @@ class Settings(BaseSettings):
     storage: DataStorageSettings = Field(default_factory=DataStorageSettings)
     trading: TradingSettings = Field(default_factory=TradingSettings)
     market_context: MarketContextSettings = Field(default_factory=MarketContextSettings)
+    capital_allocation: CapitalAllocationSettings = Field(default_factory=CapitalAllocationSettings)
 
     @field_validator("environment", mode="before")
     @classmethod

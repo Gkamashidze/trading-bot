@@ -106,6 +106,17 @@ audit_log:
   # Retention — enforced by DB partition policy
   retention_days: 365
 
+capital_allocation:
+  # Per-strategy capital cap (fraction of total equity)
+  max_capital_per_strategy_pct: 0.30    # max 30% in any single strategy
+  # Per-asset capital cap
+  max_capital_per_asset_pct: 0.20       # max 20% in any single asset
+  # Loss budgets — new entries blocked when limit is reached
+  daily_loss_budget_pct: 0.03           # 3% daily loss stops new entries
+  weekly_loss_budget_pct: 0.07          # 7% weekly loss stops new entries
+  # Correlated exposure limit
+  max_correlated_exposure_pct: 0.50     # max 50% in correlated assets
+
 market_context:
   enabled: true
   refresh_interval_minutes: 60   # how often scheduler re-fetches all providers

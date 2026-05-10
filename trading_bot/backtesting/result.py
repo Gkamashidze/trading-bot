@@ -29,6 +29,13 @@ class BacktestMetrics:
     max_consecutive_losses: int
     exposure_time_pct: float
     recovery_factor: float
+    # Transaction cost breakdown (new)
+    total_fees_paid: float = 0.0  # sum of all fees in quote currency
+    total_slippage_cost: float = 0.0  # sum of all spread + impact costs
+    gross_total_return_pct: float = 0.0  # return BEFORE fees/slippage
+    net_total_return_pct: float = 0.0  # return AFTER fees/slippage (= total_return_pct)
+    partial_fills: int = 0  # number of partial fill events
+    rejected_orders: int = 0  # number of stale-quote rejections
 
 
 @dataclass

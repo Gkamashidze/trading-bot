@@ -23,7 +23,18 @@ def fake_clock() -> FakeClock:
 def mock_exchange() -> AsyncMock:
     exchange = AsyncMock()
     exchange.fetch_open_orders.return_value = []
+    exchange.fetch_balances.return_value = {"USDT": Decimal("10000")}
     return exchange
+
+
+def _mock_portfolio_manager(cash: Decimal = Decimal("10000")) -> object:
+    from unittest.mock import MagicMock
+
+    snap = MagicMock()
+    snap.cash_balance = cash
+    mgr = MagicMock()
+    mgr.get_snapshot.return_value = snap
+    return mgr
 
 
 def _open_order(client_id: str = "abc", exchange_id: str | None = None) -> OrderState:
@@ -45,8 +56,12 @@ class TestReconcilerRunOnce:
         self, mock_exchange: AsyncMock, fake_clock: FakeClock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: OrderTracker())
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
-        event = await r.run_once()
+        event = await r.run_once_as_event()
         assert event.matched is True
         assert event.discrepancies == []
 
@@ -57,13 +72,17 @@ class TestReconcilerRunOnce:
         tracker = OrderTracker()
         tracker.record(_open_order("o1"))
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: tracker)
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         mock_exchange.fetch_open_orders.return_value = []  # exchange sees 0
 
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
-        event = await r.run_once()
+        event = await r.run_once_as_event()
         assert event.matched is False
         assert len(event.discrepancies) >= 1
-        assert r.mismatch_count == 1  # property is on Reconciler, not event
+        assert r.mismatch_count == 1
 
     @pytest.mark.asyncio
     async def test_reconciler_mismatch_count_increments(
@@ -72,6 +91,10 @@ class TestReconcilerRunOnce:
         tracker = OrderTracker()
         tracker.record(_open_order("o1"))
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: tracker)
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         mock_exchange.fetch_open_orders.return_value = []
 
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
@@ -86,10 +109,14 @@ class TestReconcilerRunOnce:
         tracker = OrderTracker()
         tracker.record(_open_order("c1", exchange_id="EX-999"))
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: tracker)
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         mock_exchange.fetch_open_orders.return_value = []  # EX-999 not on exchange
 
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
-        event = await r.run_once()
+        event = await r.run_once_as_event()
         assert event.matched is False
         assert any("EX-999" in d for d in event.discrepancies)
 
@@ -98,6 +125,10 @@ class TestReconcilerRunOnce:
         self, mock_exchange: AsyncMock, fake_clock: FakeClock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: OrderTracker())
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
         await r.run_once()
         await r.run_once()
@@ -108,6 +139,10 @@ class TestReconcilerRunOnce:
         self, mock_exchange: AsyncMock, fake_clock: FakeClock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: OrderTracker())
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
         assert r.last_run is None
         await r.run_once()
@@ -118,7 +153,11 @@ class TestReconcilerRunOnce:
         self, mock_exchange: AsyncMock, fake_clock: FakeClock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: OrderTracker())
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager",
+            lambda: _mock_portfolio_manager(),
+        )
         mock_exchange.fetch_open_orders.side_effect = RuntimeError("network failure")
         r = Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock)
-        event = await r.run_once()  # must not raise
+        event = await r.run_once_as_event()  # must not raise
         assert event.exchange_position_count == 0

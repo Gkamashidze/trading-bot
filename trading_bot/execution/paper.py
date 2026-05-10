@@ -1,18 +1,28 @@
 """Paper trading exchange — simulates fills without touching real exchange.
 
-Implements ExchangeInterface. All orders are treated as market orders and
-fill immediately at the current WebSocket price + slippage. No partial fills,
-no order queue.
+Implements ExchangeInterface. Uses RealisticFillModel (REALISTIC profile) by
+default to produce fills that account for bid/ask spread, taker fees, market
+impact, partial fills, latency, and stale quote rejection.
+
+Set fill_model_profile=FillModelProfile.IDEAL to restore legacy instant-fill
+behavior (useful for debugging strategy logic in isolation).
 
 State is in-memory and resets on restart.
 """
 
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from trading_bot.backtesting.fill_model import (
+    FillModel,
+    FillModelProfile,
+    PerfectFillModel,
+    RealisticFillModel,
+)
 from trading_bot.core.contracts import ExchangeInterface
 from trading_bot.core.exceptions import OrderRejectedError
 from trading_bot.core.models import OrderRequest, OrderSide
@@ -21,11 +31,25 @@ from trading_bot.websocket.price_cache import get_price_cache
 
 log = get_logger(__name__)
 
-_SLIPPAGE = Decimal("0.0005")  # 0.05% market impact
-
 
 class PaperExchange(ExchangeInterface):
-    """Simulates market-order fills at current WebSocket price."""
+    """Simulates fills via a configurable FillModel.
+
+    Default: RealisticFillModel (REALISTIC profile).
+    """
+
+    def __init__(
+        self,
+        fill_model_profile: FillModelProfile = FillModelProfile.REALISTIC,
+        rng_seed: int | None = None,
+    ) -> None:
+        _model: FillModel
+        if fill_model_profile == FillModelProfile.IDEAL:
+            _model = PerfectFillModel()
+        else:
+            _model = RealisticFillModel.from_profile(fill_model_profile)
+        self._fill_model = _model
+        self._rng = random.Random(rng_seed)  # noqa: S311
 
     async def place_order(self, order: Any) -> dict[str, Any]:
         req: OrderRequest = order
@@ -35,25 +59,44 @@ class PaperExchange(ExchangeInterface):
                 f"No live price available for {req.symbol} — WebSocket may be disconnected"
             )
 
-        fill_price = (
-            raw_price * (1 + _SLIPPAGE)
-            if req.side == OrderSide.BUY
-            else raw_price * (1 - _SLIPPAGE)
-        )
+        ref_price = float(raw_price)
+        qty = float(req.quantity)
+
+        if req.side == OrderSide.BUY:
+            result = self._fill_model.simulate_buy(ref_price, qty, rng=self._rng)
+        else:
+            result = self._fill_model.simulate_sell(ref_price, qty, rng=self._rng)
+
+        if result.rejected:
+            raise OrderRejectedError(
+                f"Paper fill rejected for {req.symbol}: {result.reject_reason}"
+            )
+
+        fill_price = Decimal(str(result.net_fill_price))
+        filled_qty = Decimal(str(result.filled_quantity))
+        status = "partially_filled" if result.is_partial else "filled"
 
         log.info(
             "paper_order_filled",
             symbol=req.symbol,
             side=req.side,
-            quantity=str(req.quantity),
-            fill_price=str(fill_price),
+            requested_quantity=str(req.quantity),
+            filled_quantity=str(filled_qty),
+            gross_price=str(result.gross_fill_price),
+            net_fill_price=str(fill_price),
+            fee_paid=str(result.fee_paid),
+            slippage_cost=str(result.slippage_cost),
+            latency_ms=result.latency_ms,
+            is_partial=result.is_partial,
             order_id=req.client_order_id,
         )
         return {
             "exchange_order_id": f"PAPER-{req.client_order_id}",
             "fill_price": str(fill_price),
-            "filled_quantity": str(req.quantity),
-            "status": "filled",
+            "filled_quantity": str(filled_qty),
+            "fee_paid": str(result.fee_paid),
+            "slippage_cost": str(result.slippage_cost),
+            "status": status,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
