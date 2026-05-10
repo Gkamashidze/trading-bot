@@ -32,6 +32,16 @@
 
   <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
 
+    <!-- Row 0: Live BTC/USDT Price -->
+    <section
+      id="prices-section"
+      hx-get="/partials/prices"
+      hx-trigger="load, every 5s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">ფასი იტვირთება...</div>
+    </section>
+
     <!-- Row 1: System Status -->
     <section
       id="status-section"

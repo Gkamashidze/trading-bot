@@ -327,3 +327,30 @@ class DataLineage(BaseModel):
     checksum: str = ""  # sha256 of raw bytes before processing
     quarantined: bool = False
     quarantine_reason: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Real-Time Price Tick DTO (Stage 2 — WebSocket feed)
+# ---------------------------------------------------------------------------
+
+
+class PriceTick(BaseModel):
+    """One real-time price update from the Binance 24hr miniTicker WebSocket stream."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    symbol: str
+    price: Decimal
+    open_24h: Decimal
+    high_24h: Decimal
+    low_24h: Decimal
+    volume_24h: Decimal
+    timestamp: datetime
+    source: str = "binance_ws"
+
+    @property
+    def change_pct(self) -> float:
+        """24h price change as a percentage (positive = up, negative = down)."""
+        if self.open_24h == 0:
+            return 0.0
+        return float((self.price - self.open_24h) / self.open_24h * 100)

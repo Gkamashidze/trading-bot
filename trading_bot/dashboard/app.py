@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from trading_bot.observability.logging import get_logger
+from trading_bot.websocket.price_cache import get_price_cache
 
 log = get_logger(__name__)
 
@@ -248,5 +249,14 @@ def create_app() -> FastAPI:
     @app.get("/admin/backfill/status", response_class=JSONResponse)
     async def backfill_status_endpoint() -> JSONResponse:
         return JSONResponse(_backfill_status)
+
+    @app.get("/partials/prices", response_class=HTMLResponse)
+    async def partial_prices(request: Request) -> HTMLResponse:
+        tick = get_price_cache().get("BTCUSDT")
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/prices.html",
+            context={"tick": tick},
+        )
 
     return app

@@ -40,6 +40,7 @@ from trading_bot.observability.metrics import start_metrics_server
 from trading_bot.observability.tracing import configure_tracing
 from trading_bot.scheduler.jobs import create_scheduler, register_default_jobs
 from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutdown
+from trading_bot.websocket import BinanceWebSocketClient, get_price_cache
 
 log = get_logger(__name__)
 
@@ -64,7 +65,9 @@ async def _run_dashboard() -> None:
     await server.serve()
 
 
-async def _startup() -> tuple[AsyncIOScheduler | None, object, TelegramAlerter | None]:
+async def _startup() -> tuple[
+    AsyncIOScheduler | None, object, TelegramAlerter | None, BinanceWebSocketClient | None
+]:
     """Perform all startup tasks. Returns (scheduler, pool, alerter)."""
     settings = get_settings()
 
@@ -127,6 +130,12 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, TelegramAlerter |
     else:
         log.warning("scheduler_skipped", reason="DATABASE_URL not configured")
 
+    # ── WebSocket price feed ──────────────────────────────────────────────
+    price_cache = get_price_cache()
+    ws_client = BinanceWebSocketClient(symbols=["BTCUSDT"], on_tick=price_cache.update)
+    ws_client.start()
+    log.info("websocket_started", symbols=["BTCUSDT"])
+
     # ── Dashboard wiring (pool + scheduler available now) ─────────────────
     init_dashboard(pool=pool, scheduler=scheduler)
 
@@ -151,16 +160,20 @@ async def _startup() -> tuple[AsyncIOScheduler | None, object, TelegramAlerter |
         dashboard_url="http://0.0.0.0:8000",
     )
 
-    return scheduler, pool, alerter
+    return scheduler, pool, alerter, ws_client
 
 
 async def _shutdown(
     scheduler: AsyncIOScheduler | None,
     pool: object,
     alerter: TelegramAlerter | None,
+    ws_client: BinanceWebSocketClient | None = None,
 ) -> None:
     """Graceful shutdown — drain, close, exit."""
     log.info("graceful_shutdown_initiated")
+
+    if ws_client is not None:
+        ws_client.stop()
 
     if alerter is not None:
         await alerter.send_shutdown()
@@ -183,8 +196,9 @@ async def main_async() -> None:
     scheduler = None
     pool = None
     alerter = None
+    ws_client = None
     try:
-        scheduler, pool, alerter = await _startup()
+        scheduler, pool, alerter, ws_client = await _startup()
         await asyncio.gather(
             dashboard_task,
             wait_for_shutdown(),
@@ -195,7 +209,7 @@ async def main_async() -> None:
         dashboard_task.cancel()
         sys.exit(1)
     finally:
-        await _shutdown(scheduler, pool, alerter)
+        await _shutdown(scheduler, pool, alerter, ws_client)
 
 
 def main() -> None:
