@@ -53,6 +53,13 @@ class MarketContext:
         """CPI YoY above 4% — historically negative for risk assets."""
         return self.cpi_yoy is not None and self.cpi_yoy >= 4.0
 
+    @property
+    def regime(self) -> str:
+        """Current market regime: 'risk_on', 'risk_off', or 'neutral'."""
+        from trading_bot.market_context.regime import MarketRegime, classify_regime
+
+        return str(classify_regime(self))
+
     def as_dict(self) -> dict[str, object]:
         return {
             "fear_greed_value": self.fear_greed_value,
@@ -60,6 +67,7 @@ class MarketContext:
             "funding_rate": self.funding_rate,
             "fed_funds_rate": self.fed_funds_rate,
             "cpi_yoy": self.cpi_yoy,
+            "regime": self.regime,
             "fetched_at": self.fetched_at.isoformat(),
         }
 
