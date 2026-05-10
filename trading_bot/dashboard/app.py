@@ -77,6 +77,37 @@ def create_app() -> FastAPI:
             "live_trading_enabled": False,
         }
 
+    @app.get("/healthz", response_class=JSONResponse)
+    async def healthz() -> JSONResponse:
+        """Kubernetes/Railway liveness probe — is the process alive?
+
+        Always returns 200 as long as the process can handle requests.
+        Does NOT check DB or scheduler state (that would cause restart loops
+        during DB maintenance windows).
+        """
+        return JSONResponse(
+            {"status": "alive", "uptime_seconds": int(time.time() - _start_time)}
+        )
+
+    @app.get("/readyz", response_class=JSONResponse)
+    async def readyz() -> JSONResponse:
+        """Railway readiness probe — is the bot ready to serve traffic?
+
+        Returns 200 when DB is connected and scheduler is running.
+        Returns 503 during startup or if a critical dependency is unavailable.
+        Railway waits for 200 before routing traffic to this instance.
+        """
+        db_ok = _pool is not None
+        sched_ok = _scheduler is not None and _scheduler.running
+        ready = db_ok and sched_ok
+        body = {
+            "status": "ready" if ready else "not_ready",
+            "db_connected": db_ok,
+            "scheduler_running": sched_ok,
+        }
+        status_code = 200 if ready else 503
+        return JSONResponse(body, status_code=status_code)
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request=request, name="index.html")

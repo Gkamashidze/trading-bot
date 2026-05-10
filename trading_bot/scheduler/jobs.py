@@ -181,6 +181,28 @@ async def daily_portfolio_reset_job() -> None:
     log.info("daily_portfolio_reset_job_complete")
 
 
+async def state_snapshot_job() -> None:
+    """Capture and persist portfolio + circuit breaker state. Runs every hour.
+
+    Writes JSON snapshot to /data/snapshots/ for disaster recovery.
+    Prunes files older than 7 days (168 hourly snapshots).
+    """
+    from trading_bot.disaster_recovery.snapshotter import (
+        capture_snapshot,
+        prune_old_snapshots,
+        save_snapshot,
+    )
+
+    snapshot = capture_snapshot()
+    save_snapshot(snapshot)
+    prune_old_snapshots()
+    log.info(
+        "state_snapshot_job_complete",
+        equity=snapshot.total_equity,
+        cb_tier=snapshot.cb_tier,
+    )
+
+
 def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register the default daily ingestion jobs.
 
@@ -259,6 +281,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         minute=0,
         id="daily_portfolio_reset",
         name="Daily portfolio + circuit breaker reset (UTC midnight)",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        state_snapshot_job,
+        trigger="interval",
+        minutes=60,
+        id="state_snapshot",
+        name="Hourly portfolio state snapshot (disaster recovery)",
         replace_existing=True,
     )
 
