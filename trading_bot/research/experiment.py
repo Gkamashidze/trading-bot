@@ -30,18 +30,20 @@ import asyncio
 import hashlib
 import json
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from trading_bot.observability.logging import get_logger
 
 log = get_logger(__name__)
 
-_background_tasks: set[asyncio.Task] = set()
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
-def _schedule_persist(coro) -> None:
+def _schedule_persist(coro: Coroutine[Any, Any, None]) -> None:
     try:
         loop = asyncio.get_running_loop()
         task = loop.create_task(coro)
