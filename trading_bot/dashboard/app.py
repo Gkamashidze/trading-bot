@@ -216,6 +216,49 @@ def create_app() -> FastAPI:
             context={"flags": flags, "pool_missing": False},
         )
 
+    @app.get("/partials/backfill", response_class=HTMLResponse)
+    async def partial_backfill_status(request: Request) -> HTMLResponse:
+        """Show data availability summary + backfill trigger button."""
+        from pathlib import Path
+
+        from trading_bot.config import get_settings
+
+        raw_path = Path(get_settings().storage.raw_path)
+        parquet_dir = raw_path / "binance" / "BTC_USDT" / "1d"
+
+        bar_count = 0
+        date_from: str | None = None
+        date_to: str | None = None
+
+        if parquet_dir.exists():
+            import pandas as pd
+
+            files = sorted(parquet_dir.glob("*.parquet"))
+            if files:
+                frames = []
+                for f in files:
+                    try:
+                        frames.append(pd.read_parquet(f, columns=["open_time"]))
+                    except Exception as e:
+                        log.warning("backfill_parquet_read_error", file=str(f), error=str(e))
+                if frames:
+                    combined = pd.concat(frames).drop_duplicates()
+                    bar_count = len(combined)
+                    ts = combined["open_time"].sort_values()
+                    date_from = str(ts.iloc[0])[:10]
+                    date_to = str(ts.iloc[-1])[:10]
+
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/backfill.html",
+            context={
+                "bar_count": bar_count,
+                "date_from": date_from,
+                "date_to": date_to,
+                "backfill": _backfill_status,
+            },
+        )
+
     @app.post("/admin/backfill", response_class=JSONResponse)
     async def trigger_backfill(request: Request) -> JSONResponse:
         """Start a historical OHLCV backfill as a background task.

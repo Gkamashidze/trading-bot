@@ -1,0 +1,87 @@
+<!-- Historical Data — ისტორიული მონაცემები -->
+<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <h2 class="text-sm font-semibold text-gray-300">
+        ისტორიული მონაცემები
+        <span class="text-xs text-gray-600 font-normal ml-1">BTC/USDT · 1d · Binance</span>
+      </h2>
+    </div>
+
+    {% if backfill.running %}
+      <!-- ჩამოტვირთვა მიმდინარეობს -->
+      <span class="text-xs bg-blue-900 text-blue-300 px-3 py-1 rounded-full animate-pulse">
+        ჩამოიტვირთება...
+      </span>
+    {% elif bar_count == 0 %}
+      <!-- data არ არის — backfill ღილაკი -->
+      <button
+        hx-post="/admin/backfill?symbol=BTC/USDT&timeframe=1d&days_back=730"
+        hx-target="#backfill-section"
+        hx-swap="innerHTML"
+        hx-indicator="#backfill-spinner"
+        onclick="return confirm('ჩამოიტვირთება ~730 დღის BTC/USDT data. გაგრძელება?')"
+        class="text-xs bg-blue-900 text-blue-300 hover:bg-blue-800 px-3 py-1 rounded font-semibold transition-colors"
+      >
+        ჩამოტვირთე 2 წლის Data
+      </button>
+    {% else %}
+      <!-- data არსებობს — განახლების ღილაკი -->
+      <button
+        hx-post="/admin/backfill?symbol=BTC/USDT&timeframe=1d&days_back=30"
+        hx-target="#backfill-section"
+        hx-swap="innerHTML"
+        class="text-xs bg-gray-800 text-gray-400 hover:bg-gray-700 px-3 py-1 rounded font-semibold transition-colors"
+      >
+        განაახლე (30 დღე)
+      </button>
+    {% endif %}
+  </div>
+
+  <!-- Data სტატუსი -->
+  <div class="grid grid-cols-3 gap-4 text-center">
+    <div class="bg-gray-800 rounded p-3">
+      <p class="text-xs text-gray-500 mb-1">ბარების რაოდენობა</p>
+      <p class="text-lg font-bold {% if bar_count > 0 %}text-green-400{% else %}text-red-400{% endif %}">
+        {% if bar_count > 0 %}{{ bar_count }}{% else %}0{% endif %}
+      </p>
+    </div>
+    <div class="bg-gray-800 rounded p-3">
+      <p class="text-xs text-gray-500 mb-1">პირველი ბარი</p>
+      <p class="text-sm font-semibold text-gray-300">{{ date_from or '—' }}</p>
+    </div>
+    <div class="bg-gray-800 rounded p-3">
+      <p class="text-xs text-gray-500 mb-1">ბოლო ბარი</p>
+      <p class="text-sm font-semibold text-gray-300">{{ date_to or '—' }}</p>
+    </div>
+  </div>
+
+  <!-- მიმდინარე backfill პროგრესი -->
+  {% if backfill.running %}
+  <div class="mt-3 bg-gray-800 rounded p-3 text-xs text-gray-400">
+    <span class="text-blue-400 font-semibold">ჩამოიტვირთება:</span>
+    {{ backfill.symbol }} · {{ backfill.timeframe }} ·
+    დაწყებულია {{ backfill.started_at[:19].replace('T',' ') if backfill.started_at else '—' }} UTC
+  </div>
+  {% endif %}
+
+  <!-- ბოლო backfill შედეგი -->
+  {% if not backfill.running and backfill.finished_at %}
+  <div class="mt-3 rounded p-3 text-xs
+    {% if backfill.error %}bg-red-950 text-red-400{% else %}bg-green-950 text-green-400{% endif %}">
+    {% if backfill.error %}
+      შეცდომა: {{ backfill.error }}
+    {% else %}
+      ჩამოტვირთვა დასრულდა — {{ backfill.bars_stored }} ბარი შენახულია.
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- არ არის data — განმარტება -->
+  {% if bar_count == 0 and not backfill.running %}
+  <p class="mt-3 text-xs text-gray-600">
+    სტრატეგიები და backtesting მოითხოვენ ისტორიულ data-ს.
+    დააჭირე ღილაკს — ჩამოიტვირთება 2 წლის BTC/USDT დღიური ბარები.
+  </p>
+  {% endif %}
+</div>

@@ -75,7 +75,17 @@
 
     </div>
 
-    <!-- Row 3: Strategy Signals -->
+    <!-- Row 3: Historical Data + Backfill -->
+    <section
+      id="backfill-section"
+      hx-get="/partials/backfill"
+      hx-trigger="load, every 30s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">ისტორიული მონაცემები იტვირთება...</div>
+    </section>
+
+    <!-- Row 4: Strategy Signals -->
     <section
       id="signals-section"
       hx-get="/partials/signals"
