@@ -1,78 +1,80 @@
-<div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-  <h2 class="text-lg font-semibold text-gray-800 mb-3">უსაფრთხოება</h2>
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
 
-  <!-- Kill switch status -->
-  <div class="mb-4">
-    <div class="flex items-center justify-between py-2 border-b border-gray-100">
-      <span class="text-sm text-gray-600">ქაღალდური ვაჭრობა</span>
+  <!-- სათაური -->
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">უსაფრთხოება</h2>
+    <span class="text-xs text-gray-600">Safety Layer</span>
+  </div>
+
+  <!-- Kill switch + Live trading -->
+  <div class="space-y-2 mb-4">
+    <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2.5">
+      <span class="text-sm text-gray-400">ქაღალდური ვაჭრობა</span>
       {% if paper_trading_enabled %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-          ჩართული
-        </span>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-900 text-green-300">&#9679; ჩართული</span>
       {% else %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-          გამორთული (Kill Switch)
-        </span>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-900 text-red-300">&#9679; Kill Switch</span>
       {% endif %}
     </div>
-    <div class="flex items-center justify-between py-2 border-b border-gray-100">
-      <span class="text-sm text-gray-600">ცხოვრებისეული ვაჭრობა</span>
-      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-        გამორთული (Stage 5)
-      </span>
+    <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2.5">
+      <span class="text-sm text-gray-400">Live ვაჭრობა</span>
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-700 text-gray-500">გამორთული</span>
     </div>
   </div>
 
-  <!-- Circuit breaker -->
-  <div class="mb-3">
-    <h3 class="text-sm font-medium text-gray-700 mb-2">Circuit Breaker</h3>
-    <div class="flex items-center justify-between py-2 border-b border-gray-100">
-      <span class="text-sm text-gray-600">მდგომარეობა</span>
-      {% if cb_tier == 0 %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-          {{ cb_label }}
+  <!-- Circuit Breaker -->
+  <div class="mb-4">
+    <p class="text-xs text-gray-600 uppercase tracking-wider mb-2">Circuit Breaker</p>
+    <div class="space-y-2">
+      <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2.5">
+        <span class="text-sm text-gray-400">მდგომარეობა</span>
+        {% if cb_tier == 0 %}
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-900 text-green-300">{{ cb_label }}</span>
+        {% elif cb_tier == 1 %}
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-yellow-900 text-yellow-300">{{ cb_label }}</span>
+        {% elif cb_tier == 2 %}
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-900 text-orange-300">{{ cb_label }}</span>
+        {% else %}
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-900 text-red-300">{{ cb_label }}</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2.5">
+        <span class="text-sm text-gray-400">დღიური კლება</span>
+        <span class="text-sm font-mono font-semibold
+          {% if cb_drawdown_pct >= 0.10 %}text-red-400
+          {% elif cb_drawdown_pct >= 0.05 %}text-yellow-400
+          {% else %}text-gray-300{% endif %}">
+          {{ "%.2f"|format(cb_drawdown_pct * 100) }}%
         </span>
-      {% elif cb_tier == 1 %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
-          {{ cb_label }}
-        </span>
-      {% elif cb_tier == 2 %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800">
-          {{ cb_label }}
-        </span>
-      {% else %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-          {{ cb_label }}
-        </span>
+      </div>
+      <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2.5">
+        <span class="text-sm text-gray-400">დღის პიკი</span>
+        <span class="text-sm font-mono text-gray-300">{{ cb_peak_tier }} / 3</span>
+      </div>
+      {% if cb_last_checked %}
+      <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-2.5">
+        <span class="text-sm text-gray-400">ბოლო შემოწმება</span>
+        <span class="text-xs font-mono text-gray-500">{{ cb_last_checked.strftime("%H:%M:%S UTC") }}</span>
+      </div>
       {% endif %}
     </div>
-    <div class="flex items-center justify-between py-2 border-b border-gray-100">
-      <span class="text-sm text-gray-600">დღიური კლება</span>
-      <span class="text-sm font-mono {% if cb_drawdown_pct >= 0.10 %}text-red-600{% elif cb_drawdown_pct >= 0.05 %}text-yellow-600{% else %}text-gray-800{% endif %}">
-        {{ "%.2f"|format(cb_drawdown_pct * 100) }}%
-      </span>
-    </div>
-    <div class="flex items-center justify-between py-2 border-b border-gray-100">
-      <span class="text-sm text-gray-600">დღის პიკი</span>
-      <span class="text-sm text-gray-800">{{ cb_peak_tier }} / 3</span>
-    </div>
-    {% if cb_last_checked %}
-    <div class="flex items-center justify-between py-2">
-      <span class="text-sm text-gray-600">ბოლო შემოწმება</span>
-      <span class="text-xs text-gray-500">{{ cb_last_checked.strftime("%H:%M:%S UTC") }}</span>
-    </div>
-    {% else %}
-    <div class="py-2">
-      <span class="text-xs text-gray-400">ჯერ არ შემოწმებულა</span>
-    </div>
-    {% endif %}
   </div>
 
-  <!-- Tier thresholds reference -->
-  <div class="mt-3 bg-gray-50 rounded p-3">
-    <p class="text-xs text-gray-500 font-medium mb-1">ზღვრები</p>
-    <p class="text-xs text-gray-500">I დონე: {{ "%.0f"|format(t1_pct * 100) }}% კლება — შეჩერება</p>
-    <p class="text-xs text-gray-500">II დონე: {{ "%.0f"|format(t2_pct * 100) }}% კლება — სრული გაჩერება</p>
-    <p class="text-xs text-gray-500">III დონე: {{ "%.0f"|format(t3_pct * 100) }}% კლება — საგანგებო</p>
+  <!-- Tier thresholds -->
+  <div class="bg-gray-800 rounded-lg px-4 py-3 space-y-1">
+    <p class="text-xs text-gray-600 uppercase tracking-wider mb-1.5">ზღვრები</p>
+    <div class="flex items-center justify-between text-xs">
+      <span class="text-gray-500">I დონე — შეჩერება</span>
+      <span class="font-mono text-yellow-500">{{ "%.0f"|format(t1_pct * 100) }}%</span>
+    </div>
+    <div class="flex items-center justify-between text-xs">
+      <span class="text-gray-500">II დონე — სრული გაჩერება</span>
+      <span class="font-mono text-orange-500">{{ "%.0f"|format(t2_pct * 100) }}%</span>
+    </div>
+    <div class="flex items-center justify-between text-xs">
+      <span class="text-gray-500">III დონე — საგანგებო</span>
+      <span class="font-mono text-red-500">{{ "%.0f"|format(t3_pct * 100) }}%</span>
+    </div>
   </div>
+
 </div>

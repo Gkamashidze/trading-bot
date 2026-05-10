@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
             "uptime_seconds": int(time.time() - _start_time),
             "db_connected": _pool is not None,
             "scheduler_running": _scheduler is not None and _scheduler.running,
-            "stage": "0",
+            "stage": "8",
             "live_trading_enabled": False,
         }
 
@@ -123,7 +123,7 @@ def create_app() -> FastAPI:
                 "db_connected": _pool is not None,
                 "scheduler_running": _scheduler is not None and _scheduler.running,
                 "uptime": f"{hours:02d}:{minutes:02d}:{seconds:02d}",
-                "stage": "0",
+                "stage": "8",
             },
         )
 
