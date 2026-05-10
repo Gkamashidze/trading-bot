@@ -17,9 +17,8 @@
       <!-- data არ არის — backfill ღილაკი -->
       <button
         hx-post="/admin/backfill?symbol=BTC/USDT&timeframe=1d&days_back=730"
-        hx-target="#backfill-section"
-        hx-swap="innerHTML"
-        hx-indicator="#backfill-spinner"
+        hx-swap="none"
+        hx-on::after-request="htmx.ajax('GET', '/partials/backfill', {target:'#backfill-section', swap:'innerHTML'})"
         onclick="return confirm('ჩამოიტვირთება ~730 დღის BTC/USDT data. გაგრძელება?')"
         class="text-xs bg-blue-900 text-blue-300 hover:bg-blue-800 px-3 py-1 rounded font-semibold transition-colors"
       >
@@ -29,8 +28,8 @@
       <!-- data არსებობს — განახლების ღილაკი -->
       <button
         hx-post="/admin/backfill?symbol=BTC/USDT&timeframe=1d&days_back=30"
-        hx-target="#backfill-section"
-        hx-swap="innerHTML"
+        hx-swap="none"
+        hx-on::after-request="htmx.ajax('GET', '/partials/backfill', {target:'#backfill-section', swap:'innerHTML'})"
         class="text-xs bg-gray-800 text-gray-400 hover:bg-gray-700 px-3 py-1 rounded font-semibold transition-colors"
       >
         განაახლე (30 დღე)
