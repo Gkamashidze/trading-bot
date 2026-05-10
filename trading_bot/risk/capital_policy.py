@@ -169,13 +169,6 @@ class CapitalPolicyEngine:
                 f">= limit {config.weekly_loss_budget_pct:.2%}",
             )
 
-        # ── Require explicit fill price ──────────────────────────────────────
-        if fill_price is None or fill_price <= Decimal("0"):
-            return CapitalPolicyDecision(
-                False,
-                "fill_price is missing or invalid — cannot calculate capital exposure",
-            )
-
         strategy_id = order.strategy_id or "__default__"
         policy = config.strategy_policy(strategy_id)
 
@@ -184,17 +177,35 @@ class CapitalPolicyEngine:
         effective_state = runtime_state if runtime_state is not None else policy.state
 
         # ── Strategy paused ──────────────────────────────────────────────────
+        # Check paused state before fill_price — no price needed for this gate.
         if effective_state == StrategyAllocationState.PAUSED:
             return CapitalPolicyDecision(
                 False,
                 f"strategy '{strategy_id}' is paused — no new entries allowed",
             )
 
+        # ── Resolve effective fill price ─────────────────────────────────────
+        # Prefer the explicitly-provided fill_price (actual execution price).
+        # Fall back to the order's limit_price for LIMIT orders (a reasonable
+        # worst-case estimate when the fill has not yet occurred).
+        # MARKET orders with no explicit fill_price are rejected — the caller
+        # (router.py) must provide an actual fill price after the fill.
+        effective_fill_price: Decimal
+        if fill_price is not None and fill_price > Decimal("0"):
+            effective_fill_price = fill_price
+        elif order.limit_price is not None and order.limit_price > Decimal("0"):
+            effective_fill_price = order.limit_price
+        else:
+            return CapitalPolicyDecision(
+                False,
+                "fill_price is missing or invalid — cannot calculate capital exposure",
+            )
+
         # ── Strategy capital cap ─────────────────────────────────────────────
         strategy_positions_value = sum(
             p.market_value for p in snapshot.positions if p.strategy_id == strategy_id
         )
-        new_order_value = order.quantity * fill_price
+        new_order_value = order.quantity * effective_fill_price
         strategy_exposure = float((strategy_positions_value + new_order_value) / equity)
 
         effective_cap = policy.max_capital_pct

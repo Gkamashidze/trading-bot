@@ -37,9 +37,7 @@ def get_last_backtest_at() -> datetime | None:
 
 def _resolve_snapshot_id(symbol: str, lineage_store: LineageStore) -> str | None:
     """Return the most recent snapshot ID for `symbol`, or None if none registered."""
-    snapshots = [
-        s for s in lineage_store.all_snapshots() if s.lineage.symbol == symbol
-    ]
+    snapshots = [s for s in lineage_store.all_snapshots() if s.lineage.symbol == symbol]
     if not snapshots:
         return None
     # Return the snapshot with the most recent created_at

@@ -237,7 +237,7 @@ class ExperimentRegistry:
         if self._pool is None:
             return
         try:
-            async with self._pool.acquire() as conn:
+            async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
                 await conn.execute(
                     """
                     INSERT INTO experiments (
@@ -280,7 +280,7 @@ class ExperimentRegistry:
         if self._pool is None:
             return 0
         try:
-            async with self._pool.acquire() as conn:
+            async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
                 rows = await conn.fetch(
                     """
                     SELECT experiment_id, strategy_id, dataset_snapshot_ids,

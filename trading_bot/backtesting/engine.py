@@ -22,7 +22,6 @@ from trading_bot.backtesting.fill_model import (
     FillModel,
     FillModelProfile,
     PerfectFillModel,
-    RealisticFillConfig,
     RealisticFillModel,
 )
 from trading_bot.backtesting.metrics import compute_metrics
@@ -79,9 +78,7 @@ class BacktestEngine:
             if override_kwargs:
                 import dataclasses
 
-                fill_model = RealisticFillModel(
-                    dataclasses.replace(base_cfg, **override_kwargs)
-                )
+                fill_model = RealisticFillModel(dataclasses.replace(base_cfg, **override_kwargs))  # type: ignore[arg-type]
             else:
                 fill_model = RealisticFillModel.from_profile(cfg.fill_model_profile)
 

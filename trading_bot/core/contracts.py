@@ -60,6 +60,22 @@ class ExchangeInterface(ABC):
     async def health_check(self) -> bool:
         """Return True if exchange is reachable and authenticated."""
 
+    async def replace_order(
+        self,
+        exchange_order_id: str,
+        symbol: str,
+        new_qty: Decimal | None = None,
+        new_price: Decimal | None = None,
+    ) -> dict[str, Any]:
+        """Amend an open order (cancel + resubmit with new parameters).
+
+        Default: raises NotImplementedError until live trading is enabled.
+        Override in adapters that support atomic CANCEL_REPLACE.
+        """
+        raise NotImplementedError(
+            "replace_order not yet implemented — live trading not enabled on this adapter"
+        )
+
 
 class DataProviderInterface(ABC):
     """Abstract contract for historical market data providers."""

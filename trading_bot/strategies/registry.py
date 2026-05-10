@@ -208,7 +208,7 @@ class StrategyRegistry:
                     for r in entry.approval_history
                 ]
             )
-            async with self._pool.acquire() as conn:
+            async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
                 await conn.execute(
                     """
                     INSERT INTO strategy_registry (
@@ -255,7 +255,7 @@ class StrategyRegistry:
         if self._pool is None:
             return 0
         try:
-            async with self._pool.acquire() as conn:
+            async with self._pool.acquire() as conn:  # type: ignore[attr-defined]
                 rows = await conn.fetch(
                     """
                     SELECT strategy_id, version, owner, params_hash, code_hash,
@@ -269,9 +269,7 @@ class StrategyRegistry:
         except Exception as exc:
             import logging as _logging
 
-            _logging.getLogger(__name__).error(
-                "strategy_registry_load_failed error=%s", exc
-            )
+            _logging.getLogger(__name__).error("strategy_registry_load_failed error=%s", exc)
             return 0
 
         count = 0

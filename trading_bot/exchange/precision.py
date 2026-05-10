@@ -80,7 +80,7 @@ class OrderValidationResult:
         cls,
         adjusted_qty: Decimal | None = None,
         adjusted_price: Decimal | None = None,
-    ) -> "OrderValidationResult":
+    ) -> OrderValidationResult:
         return cls(
             approved=True,
             failures=[],
@@ -90,7 +90,7 @@ class OrderValidationResult:
         )
 
     @classmethod
-    def fail(cls, failures: list[ValidationFailure], reason: str) -> "OrderValidationResult":
+    def fail(cls, failures: list[ValidationFailure], reason: str) -> OrderValidationResult:
         return cls(
             approved=False,
             failures=failures,

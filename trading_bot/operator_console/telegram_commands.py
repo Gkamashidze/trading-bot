@@ -50,7 +50,9 @@ _TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 _POLL_TIMEOUT = 30  # long-poll timeout in seconds
 
 # State-changing commands that require audit logging and idempotency tracking
-_STATE_CHANGING_COMMANDS = frozenset({"kill", "pause", "resume", "reduce_risk", "cancel_all", "ack"})
+_STATE_CHANGING_COMMANDS = frozenset(
+    {"kill", "pause", "resume", "reduce_risk", "cancel_all", "ack"}
+)
 
 # In-memory idempotency window for operator commands (60s dedup window)
 # Key: (command, args_str) → last execution timestamp
@@ -58,9 +60,7 @@ _command_dedup: dict[str, float] = {}
 _COMMAND_DEDUP_WINDOW_S = 60.0
 
 
-def _make_operator_idempotency_key(
-    command: str, args: list[str], chat_id: int
-) -> str:
+def _make_operator_idempotency_key(command: str, args: list[str], chat_id: int) -> str:
     """Deterministic idempotency key for an operator command (60s window)."""
     # Window bucket = floor(now / 60s) — same command within 60s = same key
     window = int(time.time() / _COMMAND_DEDUP_WINDOW_S)

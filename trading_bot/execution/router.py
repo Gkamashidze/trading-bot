@@ -117,7 +117,9 @@ async def route_signal(result: StrategyResult) -> None:
                     signal=result.signal,
                 )
                 tracker = get_order_tracker()
-                _record_reconciliation_rejection(result, tracker, "reconciliation_severity_critical")
+                _record_reconciliation_rejection(
+                    result, tracker, "reconciliation_severity_critical"
+                )
                 return
 
     signal_key = f"{result.symbol}:{result.strategy_id}"
@@ -241,9 +243,7 @@ async def route_signal(result: StrategyResult) -> None:
     try:
         fill_resp = await _exchange.place_order(order)
         actual_price = Decimal(fill_resp["fill_price"])
-        actual_filled_qty = Decimal(
-            str(fill_resp.get("filled_quantity", order.quantity))
-        )
+        actual_filled_qty = Decimal(str(fill_resp.get("filled_quantity", order.quantity)))
         portfolio.apply_fill(order, actual_price)
 
         order_state = OrderState(
