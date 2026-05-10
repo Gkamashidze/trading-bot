@@ -1,4 +1,16 @@
 <!-- Feature Flags — სისტემის გამართვის გადამრთველები -->
+{% set ka_desc = {
+  'live_trading_enabled':   'რეალური ფულით ვაჭრობა — Master Kill Switch. ყოველთვის გამორთული.',
+  'paper_trading_enabled':  'სიმულაციური ვაჭრობა — ორდერები სრულდება, ნამდვილი ფული არ გამოიყენება.',
+  'websocket_enabled':      'BTC ფასის real-time ნაკადი — გამორთვისას ორდერები ვერ სრულდება (ფასი უცნობია).',
+  'data_ingestion_enabled': 'ყოველდღიური OHLCV ბარების ჩამოტვირთვა Binance-იდან.',
+  'alerting_enabled':       'Telegram-ზე შეტყობინებები — სიგნალები, შეცდომები, startup/shutdown.',
+  'prometheus_enabled':     'მეტრიკების სერვერი /metrics endpoint-ზე — Railway monitoring.',
+  'strategy_sma_enabled':   'SMA Crossover სტრატეგია — სწრაფი/ნელი moving average-ის გადაკვეთა.',
+  'strategy_rsi_enabled':   'RSI Mean-Reversion სტრატეგია — oversold/overbought დონეებზე სიგნალი.',
+  'canary_trade_enabled':   'სატესტო მინი-ორდერი ბაზრის გახსნისას — სისტემის სიჯანსაღის შემოწმება.',
+} %}
+
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 h-full">
   <h2 class="text-sm font-semibold text-gray-300 mb-3">
     Feature Flags
@@ -6,31 +18,33 @@
   </h2>
 
   {% if flags %}
-    <ul class="space-y-2">
+    <ul class="space-y-3">
       {% for flag in flags %}
-      <li class="flex items-center justify-between text-xs" id="flag-{{ flag.name }}">
-        <div>
-          <span class="text-gray-200 font-mono">{{ flag.name }}</span>
-          {% if flag.description %}
-            <span class="text-gray-600 ml-2">— {{ flag.description }}</span>
-          {% endif %}
+      <li id="flag-{{ flag.name }}">
+        <div class="flex items-start justify-between text-xs gap-2">
+          <div class="min-w-0">
+            <span class="text-gray-200 font-mono">{{ flag.name }}</span>
+            <p class="text-gray-500 mt-0.5 leading-tight">
+              {{ ka_desc.get(flag.name, flag.description or '') }}
+            </p>
+          </div>
+          <button
+            hx-post="/flags/{{ flag.name }}/toggle"
+            hx-target="#flags-section"
+            hx-swap="innerHTML"
+            {% if flag.name == 'live_trading_enabled' %}
+            onclick="return confirm('დარწმუნებული ხარ? ეს Live Trading-ს ჩართავს/გამორთავს!')"
+            {% endif %}
+            class="shrink-0 mt-0.5 px-2 py-0.5 rounded text-xs font-semibold transition-colors
+              {% if flag.enabled %}
+                bg-green-900 text-green-300 hover:bg-green-800
+              {% else %}
+                bg-gray-800 text-gray-500 hover:bg-gray-700
+              {% endif %}"
+          >
+            {% if flag.enabled %}ჩართული{% else %}გამორთული{% endif %}
+          </button>
         </div>
-        <button
-          hx-post="/flags/{{ flag.name }}/toggle"
-          hx-target="#flags-section"
-          hx-swap="innerHTML"
-          {% if flag.name == 'live_trading_enabled' %}
-          onclick="return confirm('დარწმუნებული ხარ? ეს Live Trading-ს ჩართავს/გამორთავს!')"
-          {% endif %}
-          class="ml-4 px-2 py-0.5 rounded text-xs font-semibold transition-colors
-            {% if flag.enabled %}
-              bg-green-900 text-green-300 hover:bg-green-800
-            {% else %}
-              bg-gray-800 text-gray-500 hover:bg-gray-700
-            {% endif %}"
-        >
-          {% if flag.enabled %}ჩართული{% else %}გამორთული{% endif %}
-        </button>
       </li>
       {% endfor %}
     </ul>
