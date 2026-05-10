@@ -81,13 +81,13 @@ def upgrade() -> None:
         VALUES
             ('live_trading_enabled',    FALSE, 'system', 'Initial safe default'),
             ('paper_trading_enabled',   TRUE,  'system', 'Initial safe default'),
-            ('websocket_enabled',       FALSE, 'system', 'Stage 2 — not yet implemented'),
+            ('websocket_enabled',       FALSE, 'system', 'Real-time WebSocket market data streams (Stage 2+)'),
             ('data_ingestion_enabled',  TRUE,  'system', 'Initial safe default'),
             ('alerting_enabled',        TRUE,  'system', 'Initial safe default'),
             ('prometheus_enabled',      TRUE,  'system', 'Initial safe default'),
-            ('strategy_sma_enabled',    FALSE, 'system', 'Stage 3 — not yet implemented'),
-            ('strategy_rsi_enabled',    FALSE, 'system', 'Stage 3 — not yet implemented'),
-            ('canary_trade_enabled',    FALSE, 'system', 'Stage 5 — not yet implemented')
+            ('strategy_sma_enabled',    FALSE, 'system', 'SMA crossover strategy signal generation (Stage 3+)'),
+            ('strategy_rsi_enabled',    FALSE, 'system', 'RSI mean-reversion strategy signal generation (Stage 3+)'),
+            ('canary_trade_enabled',    FALSE, 'system', 'Synthetic canary trades at market open (Stage 5+)')
         ON CONFLICT (flag_name) DO NOTHING
     """)
 
