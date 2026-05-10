@@ -146,3 +146,26 @@ class TelegramAlerter:
 
     async def send_shutdown(self) -> bool:
         return await self.send(AlertLevel.WARNING, "Trading bot stopped")
+
+    async def send_circuit_breaker_alert(
+        self,
+        tier: int,
+        drawdown_pct: float,
+        action: str,
+    ) -> bool:
+        level = AlertLevel.CRITICAL if tier >= 3 else AlertLevel.WARNING
+        tier_labels = {
+            1: "I დონე — შეჩერება",
+            2: "II დონე — სრული გაჩერება",
+            3: "III დონე — საგანგებო",
+        }
+        label = tier_labels.get(tier, f"დონე {tier}")
+        detail = (
+            f"დეკლანი: {drawdown_pct:.2%} | ქმედება: {action}\n"
+            f"ქაღალდური ვაჭრობა დაბლოკილია ახალი სავაჭრო დღის გათენებამდე."
+        )
+        return await self.send(
+            level,
+            f"Circuit Breaker: {label}",
+            detail=detail,
+        )

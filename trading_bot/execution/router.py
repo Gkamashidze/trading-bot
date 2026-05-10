@@ -52,6 +52,23 @@ async def route_signal(result: StrategyResult) -> None:
     Only acts on BUY/SELL signals, and only when the signal changed from
     the previous refresh to avoid duplicate trades on sustained signals.
     """
+    from trading_bot.feature_flags import is_enabled
+    from trading_bot.safety.circuit_breaker import get_circuit_breaker
+
+    if not await is_enabled("paper_trading_enabled"):
+        log.debug("router_kill_switch_active", strategy=result.strategy_id)
+        return
+
+    cb = get_circuit_breaker()
+    if not cb.is_trading_allowed():
+        log.warning(
+            "router_circuit_breaker_halt",
+            strategy=result.strategy_id,
+            tier=cb.current_tier,
+            drawdown_pct=f"{cb.last_drawdown_pct:.2%}",
+        )
+        return
+
     prev = _last_signal.get(result.strategy_id, "HOLD")
     _last_signal[result.strategy_id] = result.signal
 

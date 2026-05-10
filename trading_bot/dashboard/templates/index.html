@@ -105,7 +105,17 @@
       <div class="text-gray-500 text-sm animate-pulse">ქაღალდური პორტფელი იტვირთება...</div>
     </section>
 
-    <!-- Row 6: Audit Log -->
+    <!-- Row 6: Safety Layer -->
+    <section
+      id="safety-section"
+      hx-get="/partials/safety"
+      hx-trigger="load, every 30s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">უსაფრთხოება იტვირთება...</div>
+    </section>
+
+    <!-- Row 7: Audit Log -->
     <section
       id="audit-section"
       hx-get="/partials/audit"

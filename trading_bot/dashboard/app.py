@@ -11,6 +11,7 @@ Routes:
     POST /admin/backfill          - Trigger historical OHLCV download (background task)
     GET  /admin/backfill/status   - JSON status of running backfill
     GET  /partials/paper_portfolio - htmx partial: paper trading portfolio card
+    GET  /partials/safety         - htmx partial: safety layer (kill switch + circuit breaker)
 """
 
 from __future__ import annotations
@@ -296,6 +297,31 @@ def create_app() -> FastAPI:
             request=request,
             name="partials/paper_portfolio.html",
             context={"snapshot": snapshot, "recent_orders": recent_orders},
+        )
+
+    @app.get("/partials/safety", response_class=HTMLResponse)
+    async def partial_safety(request: Request) -> HTMLResponse:
+        from trading_bot.config import get_settings
+        from trading_bot.feature_flags import is_enabled
+        from trading_bot.safety.circuit_breaker import get_circuit_breaker
+
+        cb = get_circuit_breaker()
+        paper_trading_enabled = await is_enabled("paper_trading_enabled")
+        risk = get_settings().risk
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/safety.html",
+            context={
+                "paper_trading_enabled": paper_trading_enabled,
+                "cb_tier": cb.current_tier,
+                "cb_label": cb.label,
+                "cb_drawdown_pct": cb.last_drawdown_pct,
+                "cb_peak_tier": cb.peak_tier_today,
+                "cb_last_checked": cb.last_checked,
+                "t1_pct": risk.tier1_daily_drawdown_pct,
+                "t2_pct": risk.tier2_daily_drawdown_pct,
+                "t3_pct": risk.tier3_daily_drawdown_pct,
+            },
         )
 
     return app

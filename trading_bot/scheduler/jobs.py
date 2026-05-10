@@ -140,6 +140,29 @@ async def daily_ohlcv_ingestion_job(
     )
 
 
+async def circuit_breaker_monitor_job() -> None:
+    """Check drawdown vs circuit breaker thresholds. Runs every 5 minutes."""
+    from trading_bot.safety.circuit_breaker import get_circuit_breaker
+
+    cb = get_circuit_breaker()
+    tier = await cb.check()
+    log.info("circuit_breaker_monitor_job_complete", tier=tier, drawdown_pct=cb.last_drawdown_pct)
+
+
+async def daily_portfolio_reset_job() -> None:
+    """Reset portfolio day-start equity and circuit breaker state. Runs at UTC midnight."""
+    from trading_bot.portfolio.manager import get_portfolio_manager
+    from trading_bot.safety.circuit_breaker import get_circuit_breaker
+
+    portfolio = get_portfolio_manager()
+    portfolio.reset_day()
+
+    cb = get_circuit_breaker()
+    cb.reset_day()
+
+    log.info("daily_portfolio_reset_job_complete")
+
+
 def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register the default daily ingestion jobs.
 
@@ -188,6 +211,25 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         hours=6,
         id="backtest_refresh",
         name="Backtest refresh (6h)",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        circuit_breaker_monitor_job,
+        trigger="interval",
+        minutes=5,
+        id="circuit_breaker_monitor",
+        name="Circuit breaker drawdown monitor (5 min)",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        daily_portfolio_reset_job,
+        trigger="cron",
+        hour=0,
+        minute=0,
+        id="daily_portfolio_reset",
+        name="Daily portfolio + circuit breaker reset (UTC midnight)",
         replace_existing=True,
     )
 

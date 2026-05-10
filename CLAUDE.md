@@ -86,12 +86,12 @@ Breaking changes: append `!` after scope: `feat(core)!: rename OHLCVBar fields`
 ## Current Stage Status
 
 - [x] Stage 0: Infrastructure & Engineering Standards
-- [ ] Stage 1: Data Engineering (BTC/USDT historical download)
-- [ ] Stage 2: Real-Time WebSocket Infrastructure
-- [ ] Stage 3: Strategy Engine (SMA, RSI)
-- [ ] Stage 4: Backtesting Framework
-- [ ] Stage 5: Execution Engine & Paper Trading
-- [ ] Stage 6: Safety Layer & Production Controls
+- [x] Stage 1: Data Engineering (BTC/USDT historical download)
+- [x] Stage 2: Real-Time WebSocket Infrastructure
+- [x] Stage 3: Strategy Engine (SMA, RSI)
+- [x] Stage 4: Backtesting Framework
+- [x] Stage 5: Execution Engine & Paper Trading
+- [x] Stage 6: Safety Layer & Production Controls
 - [ ] Stage 7: Deployment & Infrastructure
 - [ ] Stage 8: Quant & AI Expansion
 
