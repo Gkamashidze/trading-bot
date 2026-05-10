@@ -1,44 +1,50 @@
-<!-- სისტემის სტატუსი — ყოველ 10 წამში განახლდება htmx-ით -->
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<!-- სისტემის სტატუსი — ყოველ 10 წამში განახლდება -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
 
   <!-- DB კავშირი -->
-  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-    <p class="text-xs text-gray-500 mb-1">მონაცემთა ბაზა</p>
-    <p class="text-sm font-semibold">
-      {% if db_connected %}
-        <span class="text-green-400">&#9679; დაკავშირებული</span>
-      {% else %}
-        <span class="text-red-400">&#9679; გათიშული</span>
-      {% endif %}
-    </p>
-    <p class="text-xs text-gray-600 mt-1">PostgreSQL</p>
+  <div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-3">
+    <div class="shrink-0 w-2.5 h-2.5 rounded-full {% if db_connected %}bg-green-400{% else %}bg-red-500 animate-pulse{% endif %}"></div>
+    <div class="min-w-0">
+      <p class="text-xs text-gray-500 mb-0.5">მონაცემთა ბაზა</p>
+      <p class="text-sm font-semibold {% if db_connected %}text-green-400{% else %}text-red-400{% endif %} truncate">
+        {% if db_connected %}დაკავშირ.{% else %}გათიშული{% endif %}
+      </p>
+    </div>
   </div>
 
-  <!-- Scheduler — ავტომატური სამუშაოების გამშვები -->
-  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-    <p class="text-xs text-gray-500 mb-1">Scheduler (ავტო-გამშვები)</p>
-    <p class="text-sm font-semibold">
-      {% if scheduler_running %}
-        <span class="text-green-400">&#9679; გაშვებული</span>
-      {% else %}
-        <span class="text-yellow-400">&#9679; გაჩერებული</span>
-      {% endif %}
-    </p>
-    <p class="text-xs text-gray-600 mt-1">APScheduler</p>
+  <!-- Scheduler -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-3">
+    <div class="shrink-0 w-2.5 h-2.5 rounded-full {% if scheduler_running %}bg-green-400{% else %}bg-yellow-400 animate-pulse{% endif %}"></div>
+    <div class="min-w-0">
+      <p class="tip text-xs text-gray-500 mb-0.5 truncate"
+         data-tip="Scheduler (ავტო-გამშვები) — ყოველდღიური მონაცემების ჩამოტვირთვა, სიგნალების განახლება. APScheduler.">
+        ავტო-გამ. ❓
+      </p>
+      <p class="text-sm font-semibold {% if scheduler_running %}text-green-400{% else %}text-yellow-400{% endif %}">
+        {% if scheduler_running %}გაშვებ.{% else %}გაჩეღ.{% endif %}
+      </p>
+    </div>
   </div>
 
-  <!-- Uptime — სერვისის გამართული მუშაობის დრო -->
-  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-    <p class="text-xs text-gray-500 mb-1">Uptime (მუშაობის დრო)</p>
-    <p class="text-sm font-semibold text-white font-mono">{{ uptime }}</p>
-    <p class="text-xs text-gray-600 mt-1">სს:წთ:წმ</p>
+  <!-- Uptime -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-3">
+    <div class="shrink-0 w-2.5 h-2.5 rounded-full bg-blue-400"></div>
+    <div class="min-w-0">
+      <p class="tip text-xs text-gray-500 mb-0.5"
+         data-tip="Uptime — სისტემა ბოლო გათიშვიდან უწყვეტად მუშაობს. სს:წთ:წმ ფორმატი.">
+        მუშ. დრო ❓
+      </p>
+      <p class="text-sm font-bold font-mono text-white">{{ uptime }}</p>
+    </div>
   </div>
 
-  <!-- Stage — სისტემის განვითარების ეტაპი -->
-  <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-    <p class="text-xs text-gray-500 mb-1">Stage (ეტაპი)</p>
-    <p class="text-sm font-semibold text-white">{{ stage }} — Quant & AI</p>
-    <p class="text-xs text-gray-600 mt-1">Paper Trading აქტიურია</p>
+  <!-- Stage -->
+  <div class="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 flex items-center gap-3">
+    <div class="shrink-0 w-2.5 h-2.5 rounded-full bg-purple-400"></div>
+    <div class="min-w-0">
+      <p class="text-xs text-gray-500 mb-0.5">განვ. ეტაპი</p>
+      <p class="text-sm font-semibold text-purple-300">Stage {{ stage }}</p>
+    </div>
   </div>
 
 </div>

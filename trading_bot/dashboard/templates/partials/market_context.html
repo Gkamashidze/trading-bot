@@ -1,90 +1,129 @@
-<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
-  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">მაკეტ კონტექსტი</h2>
+{% if ctx is none %}
+<div class="bg-gray-800/50 rounded-xl p-4 text-xs text-gray-500 text-center">
+  ⏳ ბაზრის მონაცემები ჯერ ჩამოიტვირთება... (Scheduler-ის პირველ გაშვებამდე)
+</div>
+{% else %}
 
-  {% if ctx is none %}
-    <div class="text-gray-500 text-xs">მონაცემები ჯერ არ ჩამოიტვირთა (მოლოდინი scheduler-ის პირველ გაშვებამდე)</div>
-  {% else %}
+<div class="space-y-4">
 
-  <!-- Regime badge -->
-  <div class="flex items-center justify-between mb-4 pb-3 border-b border-gray-800">
-    <span class="text-sm text-gray-400">რეჟიმი</span>
+  <!-- ბაზრის რეჟიმი -->
+  <div class="flex items-center justify-between bg-gray-800 rounded-xl px-4 py-3">
+    <span class="tip text-sm text-gray-300"
+          data-tip="ბაზრის რეჟიმი — Risk-On ნიშნავს ინვესტორები მზადაა რისკისთვის (ბულიში). Risk-Off ნიშნავს ბაზარი ფრთხილობს, ყიდის (Bearish). ნეიტრ. = გაურკვეველია.">
+      ბაზრის სიტუაცია <span class="text-gray-600 text-xs ml-1">❓</span>
+    </span>
     {% if ctx.regime == "risk_on" %}
-      <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-green-900 text-green-300">Risk-On 🟢</span>
+      <span class="px-3 py-1 rounded-full text-xs font-bold bg-green-950 text-green-300 border border-green-900">
+        🟢 Risk-On — ოპტიმისტური
+      </span>
     {% elif ctx.regime == "risk_off" %}
-      <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-red-900 text-red-300">Risk-Off 🔴</span>
+      <span class="px-3 py-1 rounded-full text-xs font-bold bg-red-950 text-red-300 border border-red-900">
+        🔴 Risk-Off — ფრთხილი
+      </span>
     {% else %}
-      <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-gray-700 text-gray-300">ნეიტრალური ⚪</span>
+      <span class="px-3 py-1 rounded-full text-xs font-bold bg-gray-700 text-gray-300 border border-gray-600">
+        ⚪ ნეიტრალური
+      </span>
     {% endif %}
   </div>
 
-  <!-- Fear & Greed -->
-  <div class="mb-3">
-    <div class="flex items-center justify-between mb-1">
-      <span class="text-xs text-gray-500">Fear & Greed</span>
+  <!-- Fear & Greed Index -->
+  <div class="bg-gray-800 rounded-xl px-4 py-3">
+    <div class="flex items-center justify-between mb-2">
+      <span class="tip text-sm text-gray-300"
+            data-tip="Fear & Greed Index — კრიპტო ბაზრის ემოციური ინდიკატორი. 0-25 = პანიკა (ყველა ყიდის, კარგი ყიდვის დრო?). 75-100 = ევფორია (ყველა ყიდულობს, გაყიდვის დრო?). 40-60 = ნეიტრალი.">
+        Fear &amp; Greed <span class="text-gray-600 text-xs ml-1">❓</span>
+      </span>
       {% if ctx.fear_greed_value is not none %}
-        <span class="text-xs font-mono
+        <span class="text-sm font-bold font-mono
           {% if ctx.fear_greed_value <= 25 %}text-red-400
           {% elif ctx.fear_greed_value <= 45 %}text-orange-400
           {% elif ctx.fear_greed_value <= 55 %}text-gray-300
           {% elif ctx.fear_greed_value <= 75 %}text-green-400
-          {% else %}text-emerald-400{% endif %}">
-          {{ ctx.fear_greed_value }} — {{ ctx.fear_greed_label or "—" }}
+          {% else %}text-emerald-300{% endif %}">
+          {{ ctx.fear_greed_value }}
+          <span class="text-xs font-normal text-gray-500 ml-1">— {{ ctx.fear_greed_label or "—" }}</span>
+        </span>
+      {% else %}
+        <span class="text-xs text-gray-600">მონაცემი მიუწვდომელია</span>
+      {% endif %}
+    </div>
+    {% if ctx.fear_greed_value is not none %}
+    <div class="w-full bg-gray-700 rounded-full h-2.5">
+      <div class="h-2.5 rounded-full transition-all
+        {% if ctx.fear_greed_value <= 25 %}bg-red-500
+        {% elif ctx.fear_greed_value <= 45 %}bg-orange-500
+        {% elif ctx.fear_greed_value <= 55 %}bg-gray-400
+        {% elif ctx.fear_greed_value <= 75 %}bg-green-500
+        {% else %}bg-emerald-400{% endif %}"
+        style="width: {{ ctx.fear_greed_value }}%">
+      </div>
+    </div>
+    <div class="flex justify-between text-xs text-gray-700 mt-1">
+      <span>0 პანიკა</span>
+      <span>50 ნეიტ.</span>
+      <span>100 ევფ.</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ეკონ. ინდიკატორები -->
+  <div class="bg-gray-800 rounded-xl px-4 py-3 space-y-2.5">
+
+    <div class="flex items-center justify-between">
+      <span class="tip text-xs text-gray-400"
+            data-tip="BTC Funding Rate — Futures ბაზარზე Long-ების გადახდა Short-ებისთვის (ან პირიქით). + = Long-ები ბევრია (Bullish). − = Short-ები ბევრია (Bearish). 0.01%+ ძვირია.">
+        BTC Funding Rate <span class="text-gray-600 ml-0.5">❓</span>
+      </span>
+      {% if ctx.funding_rate is not none %}
+        <span class="font-mono text-xs font-semibold
+          {% if ctx.funding_rate < -0.0001 %}text-green-400
+          {% elif ctx.funding_rate > 0.001 %}text-red-400
+          {% else %}text-gray-300{% endif %}">
+          {% if ctx.funding_rate >= 0 %}+{% endif %}{{ "%.4f"|format(ctx.funding_rate * 100) }}%
         </span>
       {% else %}
         <span class="text-xs text-gray-600">—</span>
       {% endif %}
     </div>
-    {% if ctx.fear_greed_value is not none %}
-    <div class="w-full bg-gray-800 rounded-full h-1.5">
-      <div class="h-1.5 rounded-full
-        {% if ctx.fear_greed_value <= 25 %}bg-red-500
-        {% elif ctx.fear_greed_value <= 45 %}bg-orange-500
-        {% elif ctx.fear_greed_value <= 55 %}bg-gray-400
-        {% elif ctx.fear_greed_value <= 75 %}bg-green-500
-        {% else %}bg-emerald-500{% endif %}"
-        style="width: {{ ctx.fear_greed_value }}%">
-      </div>
-    </div>
-    {% endif %}
-  </div>
 
-  <!-- Funding Rate + Macro -->
-  <div class="space-y-1.5 text-xs">
-    <div class="flex justify-between">
-      <span class="text-gray-500">BTC Funding Rate</span>
-      {% if ctx.funding_rate is not none %}
-        <span class="font-mono {% if ctx.funding_rate < 0 %}text-green-400{% elif ctx.funding_rate > 0.001 %}text-red-400{% else %}text-gray-300{% endif %}">
-          {{ "%.4f"|format(ctx.funding_rate * 100) }}%
-        </span>
-      {% else %}
-        <span class="text-gray-600">—</span>
-      {% endif %}
-    </div>
-    <div class="flex justify-between">
-      <span class="text-gray-500">Fed Funds Rate</span>
+    <div class="flex items-center justify-between">
+      <span class="tip text-xs text-gray-400"
+            data-tip="Fed Funds Rate — ამერიკის ფედ. სარეზერვო სისტემის საბაზო საპროცენტო განაკვეთი. 4%+ = ბაზარს ფულის სესხება ძვირი ჯდება, კრიპტო ეცემა. 2%- = ფული იაფია, კრიპტო იზრდება.">
+        Fed Funds Rate <span class="text-gray-600 ml-0.5">❓</span>
+      </span>
       {% if ctx.fed_funds_rate is not none %}
-        <span class="font-mono {% if ctx.fed_funds_rate >= 4.0 %}text-red-400{% else %}text-gray-300{% endif %}">
+        <span class="font-mono text-xs font-semibold
+          {% if ctx.fed_funds_rate >= 4.0 %}text-red-400{% else %}text-gray-300{% endif %}">
           {{ "%.2f"|format(ctx.fed_funds_rate) }}%
         </span>
       {% else %}
-        <span class="text-gray-600">—</span>
+        <span class="text-xs text-gray-600">—</span>
       {% endif %}
     </div>
-    <div class="flex justify-between">
-      <span class="text-gray-500">CPI YoY</span>
+
+    <div class="flex items-center justify-between">
+      <span class="tip text-xs text-gray-400"
+            data-tip="CPI YoY (Consumer Price Index) — ინფლაცია. 2% = ნორმა. 4%+ = ინფლაცია მაღალია, Fed ზრდის განაკვეთებს, ბაზარი ეცემა.">
+        CPI (ინფლაცია) <span class="text-gray-600 ml-0.5">❓</span>
+      </span>
       {% if ctx.cpi_yoy is not none %}
-        <span class="font-mono {% if ctx.cpi_yoy >= 4.0 %}text-red-400{% else %}text-gray-300{% endif %}">
+        <span class="font-mono text-xs font-semibold
+          {% if ctx.cpi_yoy >= 4.0 %}text-red-400{% elif ctx.cpi_yoy >= 3.0 %}text-yellow-400{% else %}text-green-400{% endif %}">
           {{ "%.1f"|format(ctx.cpi_yoy) }}%
         </span>
       {% else %}
-        <span class="text-gray-600">—</span>
+        <span class="text-xs text-gray-600">—</span>
       {% endif %}
     </div>
-    <div class="flex justify-between pt-1 border-t border-gray-800">
-      <span class="text-gray-600">განახლდა</span>
-      <span class="text-gray-600">{{ ctx.fetched_at.strftime("%H:%M UTC") }}</span>
+
+    <div class="pt-2 border-t border-gray-700 flex justify-between text-xs text-gray-600">
+      <span>ბოლო განახლება</span>
+      <span>{{ ctx.fetched_at.strftime("%H:%M UTC") }}</span>
     </div>
+
   </div>
 
-  {% endif %}
 </div>
+
+{% endif %}

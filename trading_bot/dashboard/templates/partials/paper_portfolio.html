@@ -1,142 +1,161 @@
-<div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-full">
 
   <!-- სათაური -->
   <div class="flex items-center justify-between mb-4">
-    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">ქაღალდური პორტფელი</h2>
-    <span class="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full font-semibold">Paper Trading</span>
+    <h2 class="text-sm font-semibold text-gray-100">💰 ფინანსური მდგომარეობა</h2>
+    <span class="text-xs bg-blue-950 text-blue-300 border border-blue-900 px-2 py-0.5 rounded-full font-semibold">Paper</span>
   </div>
 
-  <p class="text-xs text-gray-600 mb-5">
-    სიმულაციური ვაჭრობა — რეალური ფული არ გამოიყენება. სიგნალები სტრატეგიებიდან ყოველ 15 წუთში.
+  <p class="text-xs text-gray-600 mb-4">
+    სიმულაციური ვაჭრობა — <strong class="text-gray-500">რეალური ფული არ გამოიყენება</strong>. ყველა ოპერაცია ვირტუალურია.
   </p>
 
   {% set snap = snapshot %}
 
-  <!-- Portfolio summary metrics -->
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-xs text-gray-500 mb-1">სულ კაპიტალი</p>
-      <p class="text-lg font-bold font-mono text-white">${{ "%.2f"|format(snap.total_equity | float) }}</p>
-      <p class="text-xs text-gray-600 mt-0.5">Total Equity</p>
-    </div>
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-xs text-gray-500 mb-1">ნაღდი ფული</p>
-      <p class="text-lg font-bold font-mono text-white">${{ "%.2f"|format(snap.cash_balance | float) }}</p>
-      <p class="text-xs text-gray-600 mt-0.5">Cash</p>
-    </div>
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-xs text-gray-500 mb-1">დღიური მოგ/ზარ</p>
-      {% set dpnl = snap.daily_pnl | float %}
-      <p class="text-lg font-bold font-mono {% if dpnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-        {{ "%+.2f"|format(dpnl) }}
+  <!-- მთავარი ფინანსური ბლოკი -->
+  <div class="grid grid-cols-2 gap-3 mb-4">
+
+    <!-- სულ კაპიტალი -->
+    <div class="bg-gray-800 rounded-xl p-4 col-span-2">
+      <p class="tip text-xs text-gray-500 mb-1"
+         data-tip="სულ კაპიტალი (Total Equity) = ნაღდი ფული + ყველა ღია პოზიციის მიმდინარე ღირებულება. ეს არის ანგარიშის მთლიანი ღირებულება.">
+        სულ კაპიტალი (Total Equity) <span class="text-gray-600 text-xs ml-1">❓</span>
       </p>
-      <p class="text-xs text-gray-600 mt-0.5">Daily P&amp;L</p>
+      <p class="text-3xl font-bold text-white font-mono tracking-tight">
+        ${{ "%.2f"|format(snap.total_equity | float) }}
+      </p>
     </div>
-    <div class="bg-gray-800 rounded-lg p-3">
-      <p class="text-xs text-gray-500 mb-1">დღიური %</p>
-      {% set dchg = (snap.daily_drawdown_pct | float) * 100 %}
-      <p class="text-lg font-bold font-mono {% if dchg >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+
+    <!-- დღიური P&L -->
+    {% set dpnl = snap.daily_pnl | float %}
+    {% set dchg = (snap.daily_drawdown_pct | float) * 100 %}
+    <div class="bg-gray-800 rounded-xl p-4">
+      <p class="tip text-xs text-gray-500 mb-1"
+         data-tip="Daily P&L — დღეს რამდენი მოიგო ან წააგო. + ნიშნავს მოგებას, − ნიშნავს ზარალს.">
+        დღეს (Daily P&amp;L) <span class="text-gray-600 text-xs ml-1">❓</span>
+      </p>
+      <p class="text-xl font-bold font-mono {% if dpnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+        {{ "%+.2f"|format(dpnl) }}$
+      </p>
+      <p class="text-xs font-mono {% if dchg >= 0 %}text-green-600{% else %}text-red-600{% endif %} mt-0.5">
         {{ "%+.2f"|format(dchg) }}%
       </p>
-      <p class="text-xs text-gray-600 mt-0.5">Daily Change</p>
     </div>
+
+    <!-- ნაღდი ფული -->
+    <div class="bg-gray-800 rounded-xl p-4">
+      <p class="tip text-xs text-gray-500 mb-1"
+         data-tip="Cash — თავისუფალი ვირტუალური ფული, რომელიც ჯერ არ არის ინვესტირებული. ახალი ყიდვისთვის გამოიყენება.">
+        ნაღდი ფული (Cash) <span class="text-gray-600 text-xs ml-1">❓</span>
+      </p>
+      <p class="text-xl font-bold font-mono text-blue-300">
+        ${{ "%.2f"|format(snap.cash_balance | float) }}
+      </p>
+    </div>
+
   </div>
 
-  <!-- Open positions -->
-  <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">ღია პოზიციები</h3>
-  {% if snap.positions %}
-    <div class="overflow-x-auto mb-5">
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="text-gray-600 border-b border-gray-800">
-            <th class="text-left pb-2 pr-3">სიმბოლო</th>
-            <th class="text-right pb-2 pr-3">რაოდენობა</th>
-            <th class="text-right pb-2 pr-3">შეყვ. ფასი</th>
-            <th class="text-right pb-2 pr-3">მიმდ. ფასი</th>
-            <th class="text-right pb-2 pr-3">ღირებულება</th>
-            <th class="text-right pb-2 pr-3">განუხ. PnL</th>
-            <th class="text-left pb-2">სტრატეგია</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for pos in snap.positions %}
-            {% set pnl = pos.unrealised_pnl | float %}
-            {% set pnl_pct = (pos.unrealised_pnl_pct | float) * 100 %}
-            <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-              <td class="py-2 pr-3 font-semibold text-white">{{ pos.symbol }}</td>
-              <td class="py-2 pr-3 text-right font-mono text-gray-300">{{ "%.6f"|format(pos.quantity | float) }}</td>
-              <td class="py-2 pr-3 text-right font-mono text-gray-300">${{ "%.2f"|format(pos.average_cost | float) }}</td>
-              <td class="py-2 pr-3 text-right font-mono text-gray-300">${{ "%.2f"|format(pos.current_price | float) }}</td>
-              <td class="py-2 pr-3 text-right font-mono text-gray-300">${{ "%.2f"|format(pos.market_value | float) }}</td>
-              <td class="py-2 pr-3 text-right font-mono {% if pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-                {{ "%+.2f"|format(pnl) }}<br>
-                <span class="text-gray-500">({{ "%+.1f"|format(pnl_pct) }}%)</span>
-              </td>
-              <td class="py-2">
-                <span class="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-xs">{{ pos.strategy_id }}</span>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <!-- ღია პოზიციები -->
+  <div class="mb-4">
+    <div class="flex items-center justify-between mb-2">
+      <span class="tip text-xs font-semibold text-gray-500 uppercase tracking-wider"
+            data-tip="ღია პოზიცია — ბოტმა ყიდვა სრულ გაყიდვამდე. სვეტი 'განუხ. PnL' = ჯერ გაუყიდავი მოგება/ზარალი.">
+        ღია პოზიციები <span class="text-gray-600 text-xs ml-1">❓</span>
+      </span>
+      <span class="text-xs text-gray-600">{{ snap.positions | length }} ცალი</span>
     </div>
-  {% else %}
-    <p class="text-sm text-gray-600 italic mb-5">ამჟამად ღია პოზიციები არ არის.</p>
-  {% endif %}
+    {% if snap.positions %}
+      <div class="overflow-x-auto rounded-lg border border-gray-800">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-800/70">
+            <tr class="text-gray-500">
+              <th class="text-left px-3 py-2">სიმბოლო</th>
+              <th class="text-right px-3 py-2">რაოდ.</th>
+              <th class="text-right px-3 py-2">შეყვ. ფასი</th>
+              <th class="text-right px-3 py-2">მიმდ. ფასი</th>
+              <th class="text-right px-3 py-2">ღირებ.</th>
+              <th class="text-right px-3 py-2 tip" data-tip="Unrealized PnL — ჯერ გაუყიდავი პოზიციის მოგება/ზარალი. გაყიდვამდე ვირტუალურია.">განუხ. PnL ❓</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pos in snap.positions %}
+              {% set pnl = pos.unrealised_pnl | float %}
+              {% set pnl_pct = (pos.unrealised_pnl_pct | float) * 100 %}
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td class="px-3 py-2.5 font-bold text-white">{{ pos.symbol }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-400">{{ "%.5f"|format(pos.quantity | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-400">${{ "%.0f"|format(pos.average_cost | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-300">${{ "%.0f"|format(pos.current_price | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-300">${{ "%.2f"|format(pos.market_value | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono font-semibold {% if pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                  {{ "%+.2f"|format(pnl) }}$
+                  <span class="text-xs {% if pnl >= 0 %}text-green-700{% else %}text-red-700{% endif %}">
+                    ({{ "%+.1f"|format(pnl_pct) }}%)
+                  </span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-gray-800/40 rounded-lg px-4 py-3 text-sm text-gray-600 italic">
+        ამჟამად ღია პოზიციები არ არის — ბოტი ელოდება სიგნალს.
+      </div>
+    {% endif %}
+  </div>
 
-  <!-- Recent orders -->
-  <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">ბოლო ორდერები</h3>
-  {% if recent_orders %}
-    <div class="overflow-x-auto">
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="text-gray-600 border-b border-gray-800">
-            <th class="text-left pb-2 pr-3">სიმბოლო</th>
-            <th class="text-left pb-2 pr-3">მხარე</th>
-            <th class="text-right pb-2 pr-3">რაოდენობა</th>
-            <th class="text-right pb-2 pr-3">შევს. ფასი</th>
-            <th class="text-left pb-2 pr-3">სტატუსი</th>
-            <th class="text-left pb-2 pr-3">სტრატეგია</th>
-            <th class="text-left pb-2">მიზეზი</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for order in recent_orders %}
-            <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-              <td class="py-2 pr-3 font-semibold text-white">{{ order.symbol }}</td>
-              <td class="py-2 pr-3">
-                {% if order.side == "buy" %}
-                  <span class="bg-green-900 text-green-300 px-2 py-0.5 rounded text-xs font-semibold">▲ ყიდვა</span>
-                {% else %}
-                  <span class="bg-red-900 text-red-300 px-2 py-0.5 rounded text-xs font-semibold">▼ გაყიდვა</span>
-                {% endif %}
-              </td>
-              <td class="py-2 pr-3 text-right font-mono text-gray-300">{{ "%.6f"|format(order.requested_quantity | float) }}</td>
-              <td class="py-2 pr-3 text-right font-mono text-gray-300">
-                {% if order.average_fill_price %}
-                  ${{ "%.2f"|format(order.average_fill_price | float) }}
-                {% else %}—{% endif %}
-              </td>
-              <td class="py-2 pr-3">
-                {% if order.status == "filled" %}
-                  <span class="bg-green-900 text-green-300 px-2 py-0.5 rounded text-xs">შევსებული ✓</span>
-                {% elif order.status == "rejected" %}
-                  <span class="bg-red-900 text-red-300 px-2 py-0.5 rounded text-xs">უარყოფილი ✗</span>
-                {% else %}
-                  <span class="bg-gray-700 text-gray-400 px-2 py-0.5 rounded text-xs">{{ order.status }}</span>
-                {% endif %}
-              </td>
-              <td class="py-2 pr-3">
-                <span class="bg-gray-700 text-gray-300 px-2 py-0.5 rounded text-xs">{{ order.strategy_id }}</span>
-              </td>
-              <td class="py-2 text-gray-500 italic">{{ order.reject_reason or "" }}</td>
+  <!-- ბოლო ორდერები -->
+  <div>
+    <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+      ბოლო ორდერები
+    </span>
+    {% if recent_orders %}
+      <div class="overflow-x-auto rounded-lg border border-gray-800 mt-2">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-800/70">
+            <tr class="text-gray-500">
+              <th class="text-left px-3 py-2">სიმბ.</th>
+              <th class="text-left px-3 py-2">ოპ.</th>
+              <th class="text-right px-3 py-2">ფასი</th>
+              <th class="text-left px-3 py-2">სტატ.</th>
+              <th class="text-left px-3 py-2">სტრ.</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <p class="text-sm text-gray-600 italic">ჯერ ვერც ერთი ორდერი არ შესრულებულა.</p>
-  {% endif %}
+          </thead>
+          <tbody>
+            {% for order in recent_orders %}
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td class="px-3 py-2 font-bold text-white">{{ order.symbol }}</td>
+                <td class="px-3 py-2">
+                  {% if order.side == "buy" %}
+                    <span class="bg-green-950 text-green-300 border border-green-900 px-2 py-0.5 rounded text-xs font-bold">▲ ყიდვა</span>
+                  {% else %}
+                    <span class="bg-red-950 text-red-300 border border-red-900 px-2 py-0.5 rounded text-xs font-bold">▼ გაყიდ.</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-gray-300">
+                  {% if order.average_fill_price %}${{ "%.0f"|format(order.average_fill_price | float) }}{% else %}—{% endif %}
+                </td>
+                <td class="px-3 py-2">
+                  {% if order.status == "filled" %}
+                    <span class="text-green-500">✓ შევს.</span>
+                  {% elif order.status == "rejected" %}
+                    <span class="text-red-500">✗ უარყ.</span>
+                  {% else %}
+                    <span class="text-gray-500">{{ order.status }}</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-2 text-gray-600 font-mono text-xs">{{ order.strategy_id }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-gray-800/40 rounded-lg px-4 py-3 mt-2 text-sm text-gray-600 italic">
+        ჯერ ვერც ერთი ორდერი არ შესრულებულა.
+      </div>
+    {% endif %}
+  </div>
 
 </div>
