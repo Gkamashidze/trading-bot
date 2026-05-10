@@ -75,7 +75,17 @@
 
     </div>
 
-    <!-- Row 3: Audit Log -->
+    <!-- Row 3: Strategy Signals -->
+    <section
+      id="signals-section"
+      hx-get="/partials/signals"
+      hx-trigger="load, every 60s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">სიგნალები იტვირთება...</div>
+    </section>
+
+    <!-- Row 4: Audit Log -->
     <section
       id="audit-section"
       hx-get="/partials/audit"

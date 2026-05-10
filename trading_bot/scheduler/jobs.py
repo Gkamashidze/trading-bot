@@ -69,6 +69,17 @@ def create_scheduler(database_url: str) -> AsyncIOScheduler:
     wait=wait_exponential_jitter(initial=2, max=30, jitter=2),
     reraise=True,
 )
+async def signal_refresh_job() -> None:
+    """Recompute all strategy signals from latest Parquet data.
+
+    Runs every 15 minutes. Safe to miss a run (coalesce=True).
+    """
+    from trading_bot.strategies.runner import refresh_signals
+
+    results = await refresh_signals()
+    log.info("signal_refresh_job_complete", signals_computed=len(results))
+
+
 async def daily_ohlcv_ingestion_job(
     exchange_id: str = "binance",
     symbol: str = "BTC/USDT",
@@ -151,6 +162,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
             "symbol": "BTC/USDT",
             "timeframe": "1h",
         },
+    )
+
+    scheduler.add_job(
+        signal_refresh_job,
+        trigger="interval",
+        minutes=15,
+        id="signal_refresh",
+        name="Strategy signal refresh (15 min)",
+        replace_existing=True,
     )
 
     log.info("default_scheduler_jobs_registered")

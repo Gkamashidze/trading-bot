@@ -1,0 +1,121 @@
+{% if results %}
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+
+  <!-- სათაური -->
+  <div class="flex items-center justify-between mb-1">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">სიგნალები — BTC/USDT</h2>
+    {% if computed_at %}
+    <span class="text-xs text-gray-600">{{ computed_at }}</span>
+    {% endif %}
+  </div>
+
+  <!-- გამაფრთხილებელი ბანერი -->
+  <div class="mb-4 bg-yellow-900/30 border border-yellow-800 rounded-lg px-3 py-2 text-xs text-yellow-400">
+    ⚠️ <strong>ეს მხოლოდ ანალიტიკაა</strong> — ყიდვა/გაყიდვა გათიშულია Stage 5-მდე. სიგნალები საგანმანათლებლო მიზნებისთვის.
+  </div>
+
+  <div class="space-y-4">
+    {% for r in results %}
+    <div class="bg-gray-800 rounded-lg p-4">
+
+      <!-- სტრატეგიის სახელი + სიგნალის ბეჯი -->
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-semibold text-white">
+          {% if r.strategy_id == "sma_crossover" %}
+            📈 SMA გადაკვეთა (20 / 50 დღე)
+          {% elif r.strategy_id == "rsi_mean_reversion" %}
+            📊 RSI სიძლიერის ინდექსი (14 დღე)
+          {% else %}
+            {{ r.strategy_id }}
+          {% endif %}
+        </span>
+        <span class="text-xs font-bold px-3 py-1 rounded-full
+          {% if r.signal == 'BUY' %}bg-green-900 text-green-300
+          {% elif r.signal == 'SELL' %}bg-red-900 text-red-300
+          {% else %}bg-gray-700 text-gray-300{% endif %}">
+          {% if r.signal == 'BUY' %}▲ ყიდვა
+          {% elif r.signal == 'SELL' %}▼ გაყიდვა
+          {% else %}— ნეიტრალი{% endif %}
+        </span>
+      </div>
+
+      <!-- სიგნალის სიძლიერის ზოლი -->
+      <div class="mb-3">
+        <div class="flex justify-between text-xs text-gray-500 mb-1">
+          <span>სიგნალის სიძლიერე</span>
+          <span>{{ "%.0f"|format(r.strength * 100) }}%</span>
+        </div>
+        <div class="w-full bg-gray-700 rounded-full h-1.5">
+          <div class="h-1.5 rounded-full transition-all
+            {% if r.signal == 'BUY' %}bg-green-500
+            {% elif r.signal == 'SELL' %}bg-red-500
+            {% else %}bg-gray-500{% endif %}"
+            style="width: {{ "%.0f"|format(r.strength * 100) }}%">
+          </div>
+        </div>
+      </div>
+
+      <!-- ინდიკატორის მნიშვნელობები -->
+      {% if r.indicators %}
+      <div class="flex flex-wrap gap-2 mb-3">
+        {% for k, v in r.indicators.items() %}
+        <span class="bg-gray-700 text-gray-300 text-xs px-2 py-0.5 rounded font-mono">
+          {{ k }}: {{ "%.2f"|format(v) }}
+        </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- ქართული ახსნა -->
+      <div class="text-xs text-gray-400 border-t border-gray-700 pt-3 space-y-1">
+        {% if r.strategy_id == "sma_crossover" %}
+          <p><strong class="text-gray-200">SMA — მოძრავი საშუალო:</strong> ბოლო N დღის ფასის საშუალო. ადარებს ახლახან (20 დღე) და ძველ (50 დღე) ტენდენციას.</p>
+          {% if r.signal == 'BUY' %}
+            <p class="text-green-400">🟢 20-დღიანი ხაზი გადაკვეთა 50-დღიანს ზემოდან — "ოქროს ჯვარი". ახლო ტრენდი გრძელვადიანს გადააჭარბა, ბაზარი ოპტიმისტურია.</p>
+          {% elif r.signal == 'SELL' %}
+            <p class="text-red-400">🔴 20-დღიანი ხაზი ჩამოვარდა 50-დღიანს ქვემოთ — "სიკვდილის ჯვარი". ახლო ტრენდი გრძელვადიანზე სუსტია, ბაზარი ფრთხილობს.</p>
+          {% else %}
+            {% if r.indicators.get('sma_20', 0) > r.indicators.get('sma_50', 0) %}
+              <p>20-დღიანი ≥ 50-დღიანი — ტრენდი ზემოთ, მაგრამ გადაკვეთა ახლახან არ მომხდარა. ბაზარი ჯერ არ იძლევა მკაფიო სიგნალს.</p>
+            {% else %}
+              <p>20-დღიანი ≤ 50-დღიანი — ტრენდი ქვემოთ, მაგრამ გადაკვეთა ახლახან არ მომხდარა. ბაზარი ჯერ არ იძლევა მკაფიო სიგნალს.</p>
+            {% endif %}
+          {% endif %}
+
+        {% elif r.strategy_id == "rsi_mean_reversion" %}
+          <p><strong class="text-gray-200">RSI — სიძლიერის ინდექსი:</strong> 0–100 სკალა. ზომავს ბოლო 14 დღეში ბიტქოინი მეტად გაძვირდა თუ გაიაფდა.</p>
+          {% if r.signal == 'BUY' %}
+            <p class="text-green-400">🟢 RSI &lt; 30 — "ზედმეტად გაიაფდა" (oversold). ისტორიულად ამ ნიშნულზე ფასი ხშირად ზრდას იწყებს — გამყიდველები დაიღალნენ.</p>
+          {% elif r.signal == 'SELL' %}
+            <p class="text-red-400">🔴 RSI &gt; 70 — "ზედმეტად გაძვირდა" (overbought). ისტორიულად ამ ნიშნულზე ფასი ხშირად კლებას იწყებს — მყიდველები გაძვირდა.</p>
+          {% else %}
+            <p>RSI ნეიტრალურ ზონაში (30–70) — ბიტქოინი არც ზედმეტად ძვირი, არც ძალიან იაფი. მკვეთრი სიგნალი არ არის.</p>
+          {% endif %}
+        {% endif %}
+
+        <p class="text-gray-600 italic">{{ r.reason }}</p>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <p class="text-xs text-gray-700 mt-3">
+    განახლება ყოველ 15 წუთში •
+    {% if results %}{{ results[0].bars_used }} ბარი გამოყენებულია{% endif %}
+  </p>
+</div>
+
+{% else %}
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-6">
+  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">სიგნალები — BTC/USDT</h2>
+  <div class="flex items-center gap-3 text-gray-500">
+    <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+    <p class="text-sm">სიგნალები ჯერ არ გამოთვლილა — ელოდება ისტორიულ მონაცემებს...</p>
+  </div>
+  <p class="text-xs text-gray-600 mt-2">
+    პირველი სიგნალები გამოჩნდება 15 წუთში, მას შემდეგ რაც ბოტი Parquet ფაილებიდან
+    ისტორიულ მონაცემებს წაიკითხავს. თუ backfill ჯერ არ გაუშვია, გახსენი
+    <code class="text-gray-500">/admin/backfill</code>.
+  </p>
+</div>
+{% endif %}

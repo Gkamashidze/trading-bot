@@ -39,6 +39,7 @@ from trading_bot.observability.logging import configure_logging, get_logger
 from trading_bot.observability.metrics import start_metrics_server
 from trading_bot.observability.tracing import configure_tracing
 from trading_bot.scheduler.jobs import create_scheduler, register_default_jobs
+from trading_bot.strategies.runner import refresh_signals
 from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutdown
 from trading_bot.websocket import BinanceWebSocketClient, get_price_cache
 
@@ -129,6 +130,13 @@ async def _startup() -> tuple[
         log.info("scheduler_started")
     else:
         log.warning("scheduler_skipped", reason="DATABASE_URL not configured")
+
+    # ── Strategy signals (initial computation, non-blocking) ─────────────
+    _signal_task = asyncio.create_task(
+        refresh_signals(), name="initial_signal_refresh"
+    )
+    del _signal_task  # fire-and-forget: task runs independently
+    log.info("signal_refresh_scheduled")
 
     # ── WebSocket price feed ──────────────────────────────────────────────
     price_cache = get_price_cache()
