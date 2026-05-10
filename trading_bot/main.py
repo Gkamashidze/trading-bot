@@ -132,9 +132,7 @@ async def _startup() -> tuple[
         log.warning("scheduler_skipped", reason="DATABASE_URL not configured")
 
     # ── Strategy signals (initial computation, non-blocking) ─────────────
-    _signal_task = asyncio.create_task(
-        refresh_signals(), name="initial_signal_refresh"
-    )
+    _signal_task = asyncio.create_task(refresh_signals(), name="initial_signal_refresh")
     del _signal_task  # fire-and-forget: task runs independently
     log.info("signal_refresh_scheduled")
 

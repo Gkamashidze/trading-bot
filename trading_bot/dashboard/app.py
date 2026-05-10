@@ -264,9 +264,7 @@ def create_app() -> FastAPI:
     async def partial_signals(request: Request) -> HTMLResponse:
         results = get_latest_signals()
         computed_at_dt = get_last_computed_at()
-        computed_at = (
-            computed_at_dt.strftime("%Y-%m-%d %H:%M UTC") if computed_at_dt else None
-        )
+        computed_at = computed_at_dt.strftime("%Y-%m-%d %H:%M UTC") if computed_at_dt else None
         return templates.TemplateResponse(
             request=request,
             name="partials/signals.html",
