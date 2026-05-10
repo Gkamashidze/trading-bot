@@ -140,7 +140,8 @@ class TestCircuitBreakerCheck:
 
 class TestCircuitBreakerReset:
     @pytest.mark.asyncio
-    async def test_reset_day_clears_tier(self) -> None:
+    async def test_reset_day_holds_tier1_when_drawdown_still_above_threshold(self) -> None:
+        """Drawdown still 11% at midnight — breaker stays at tier 1, not tier 0."""
         cb = CircuitBreaker()
         pm = _make_portfolio(-0.11)
         with patch("trading_bot.portfolio.manager.get_portfolio_manager", return_value=pm):
@@ -150,9 +151,25 @@ class TestCircuitBreakerReset:
 
         assert cb.current_tier == 2
         cb.reset_day()
-        assert cb.current_tier == 0
+        # 11% drawdown >= tier-1 threshold (5%) → stays at tier 1 (not 0)
+        assert cb.current_tier == 1
         assert cb.peak_tier_today == 0
         assert cb.tripped_at is None
+        assert cb.is_trading_allowed() is True  # tier 1 still allows trading
+
+    @pytest.mark.asyncio
+    async def test_reset_day_clears_to_tier0_when_recovered(self) -> None:
+        """Drawdown recovered to 2% — breaker fully clears at midnight."""
+        cb = CircuitBreaker()
+        pm = _make_portfolio(-0.02)
+        with patch("trading_bot.portfolio.manager.get_portfolio_manager", return_value=pm):
+            with patch("asyncio.get_event_loop") as mock_loop:
+                mock_loop.return_value.create_task = MagicMock()
+                await cb.check()
+
+        assert cb.current_tier == 0
+        cb.reset_day()
+        assert cb.current_tier == 0
         assert cb.is_trading_allowed() is True
 
     def test_reset_day_on_fresh_breaker_is_noop(self) -> None:

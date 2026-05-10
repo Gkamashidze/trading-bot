@@ -86,15 +86,30 @@ class CircuitBreaker:
         return self._current_tier < 2
 
     def reset_day(self) -> None:
-        """Reset for a new trading day (call at UTC midnight)."""
+        """Reset for a new trading day (call at UTC midnight).
+
+        If drawdown still exceeds the tier-1 threshold at reset time, the breaker
+        stays at tier 1 rather than fully clearing — prevents immediate re-trading
+        into a portfolio that hasn't recovered.
+        """
         prev_tier = self._current_tier
-        self._current_tier = 0
+        risk = get_settings().risk
+
+        # Hysteresis: only clear fully if drawdown has recovered below tier-1
+        if self._last_drawdown_pct >= risk.tier1_daily_drawdown_pct:
+            self._current_tier = 1
+            reset_to = 1
+        else:
+            self._current_tier = 0
+            reset_to = 0
+
         self._peak_tier_today = 0
-        self._last_drawdown_pct = 0.0
         self._tripped_at = None
         log.info(
             "circuit_breaker_day_reset",
             previous_tier=prev_tier,
+            reset_to=reset_to,
+            last_drawdown_pct=f"{self._last_drawdown_pct:.2%}",
         )
 
     # ── Properties ────────────────────────────────────────────────────────────
