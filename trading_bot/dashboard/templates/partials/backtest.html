@@ -1,0 +1,145 @@
+{% if not results %}
+<div class="card">
+  <div class="card-header">
+    <h2>📊 Backtesting შედეგები</h2>
+    <small>ისტორიული მონაცემები ჯერ არ არის. Stage 1 ჩამოტვირთავს BTC/USDT კანდელებს.</small>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-header">
+    <h2>📊 Backtesting შედეგები</h2>
+    {% if computed_at %}
+    <small>გამოთვლილია: {{ computed_at }} | პერიოდი: {{ results[0].period_start }} → {{ results[0].period_end }} | {{ results[0].n_bars }} ბარი</small>
+    {% endif %}
+    <small style="display:block; margin-top:4px; color:#f59e0b">
+      ⚠️ ბექტესტი წარსული მონაცემებია — მომავალ შემოსავალს არ გარანტიას</small>
+  </div>
+
+  {% for r in results %}
+  {% set m = r.metrics %}
+  <div style="margin-bottom: 24px; padding: 16px; background: #1e293b; border-radius: 8px; border: 1px solid #334155;">
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <strong style="font-size: 1.05em;">
+        {% if r.strategy_id == "sma_crossover" %}მოძრავი საშუალოს კვეთა (SMA 20/50)
+        {% elif r.strategy_id == "rsi_mean_reversion" %}სიძლიერის ინდექსი — საშუალოსკენ დაბრუნება (RSI 14)
+        {% else %}{{ r.strategy_id }}{% endif %}
+      </strong>
+      <span style="font-size: 1.3em; font-weight: bold;
+        color: {% if m.total_return_pct > 0 %}#22c55e{% elif m.total_return_pct < 0 %}#ef4444{% else %}#94a3b8{% endif %}">
+        {% if m.total_return_pct > 0 %}+{% endif %}{{ m.total_return_pct }}%
+      </span>
+    </div>
+
+    <!-- Key metrics grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 14px;">
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.72em; color:#94a3b8; margin-bottom:2px;">CAGR (წლიური)</div>
+        <div style="font-weight:bold; color:{% if m.cagr_pct > 0 %}#22c55e{% else %}#ef4444{% endif %}">
+          {% if m.cagr_pct > 0 %}+{% endif %}{{ m.cagr_pct }}%
+        </div>
+      </div>
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.72em; color:#94a3b8; margin-bottom:2px;">Sharpe Ratio</div>
+        <div style="font-weight:bold; color:{% if m.sharpe_ratio > 1 %}#22c55e{% elif m.sharpe_ratio > 0 %}#f59e0b{% else %}#ef4444{% endif %}">
+          {{ m.sharpe_ratio }}
+        </div>
+      </div>
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.72em; color:#94a3b8; margin-bottom:2px;">Max Drawdown</div>
+        <div style="font-weight:bold; color:#ef4444;">{{ m.max_drawdown_pct }}%</div>
+      </div>
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.72em; color:#94a3b8; margin-bottom:2px;">Sortino Ratio</div>
+        <div style="font-weight:bold; color:{% if m.sortino_ratio > 1 %}#22c55e{% elif m.sortino_ratio > 0 %}#f59e0b{% else %}#ef4444{% endif %}">
+          {{ m.sortino_ratio }}
+        </div>
+      </div>
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.72em; color:#94a3b8; margin-bottom:2px;">Calmar Ratio</div>
+        <div style="font-weight:bold;">{{ m.calmar_ratio }}</div>
+      </div>
+
+      <div style="background:#0f172a; padding:10px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.72em; color:#94a3b8; margin-bottom:2px;">Recovery Factor</div>
+        <div style="font-weight:bold;">{{ m.recovery_factor }}</div>
+      </div>
+
+    </div>
+
+    <!-- Trade stats -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 14px;">
+
+      <div style="background:#0f172a; padding:8px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.7em; color:#94a3b8; margin-bottom:2px;">სულ ტრეიდი</div>
+        <div style="font-weight:bold;">{{ m.total_trades }}</div>
+      </div>
+
+      <div style="background:#0f172a; padding:8px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.7em; color:#94a3b8; margin-bottom:2px;">გამარჯვება %</div>
+        <div style="font-weight:bold; color:{% if m.win_rate > 50 %}#22c55e{% else %}#f59e0b{% endif %}">{{ m.win_rate }}%</div>
+      </div>
+
+      <div style="background:#0f172a; padding:8px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.7em; color:#94a3b8; margin-bottom:2px;">Profit Factor</div>
+        <div style="font-weight:bold; color:{% if m.profit_factor > 1 %}#22c55e{% else %}#ef4444{% endif %}">{{ m.profit_factor }}</div>
+      </div>
+
+      <div style="background:#0f172a; padding:8px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.7em; color:#94a3b8; margin-bottom:2px;">Expectancy</div>
+        <div style="font-weight:bold; color:{% if m.expectancy > 0 %}#22c55e{% else %}#ef4444{% endif %}">{{ m.expectancy }}%</div>
+      </div>
+
+      <div style="background:#0f172a; padding:8px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.7em; color:#94a3b8; margin-bottom:2px;">მიმდ. წაგება</div>
+        <div style="font-weight:bold; color:{% if m.max_consecutive_losses > 5 %}#ef4444{% else %}#f59e0b{% endif %}">{{ m.max_consecutive_losses }}</div>
+      </div>
+
+      <div style="background:#0f172a; padding:8px; border-radius:6px; text-align:center;">
+        <div style="font-size:0.7em; color:#94a3b8; margin-bottom:2px;">პოზიციაში %</div>
+        <div style="font-weight:bold;">{{ m.exposure_time_pct }}%</div>
+      </div>
+
+    </div>
+
+    <!-- Georgian explanation -->
+    <div style="background: #0f172a; border-left: 3px solid #3b82f6; padding: 10px 14px; border-radius: 0 6px 6px 0; font-size: 0.82em; color: #cbd5e1; line-height: 1.6;">
+      {% if r.strategy_id == "sma_crossover" %}
+        <strong>რა ნიშნავს ეს?</strong><br>
+        სტრატეგია ყიდულობს, როდესაც სწრაფი საშუალო (20 დღე) კვეთს ნელ საშუალოს (50 დღე) ქვემოდან ზევით —
+        "ოქროს ჯვარი". ყიდის, როდესაც ზევიდან ქვემოთ — "სიკვდილის ჯვარი".
+        {% if m.total_trades == 0 %}
+          მონაცემები ბექტესტისთვის არ არის საკმარისი ტრეიდების გასაკეთებლად.
+        {% elif m.total_return_pct > 0 %}
+          ამ პერიოდში სტრატეგია მომგებიანი იყო. Sharpe > 1 ნიშნავს კარგ რისკ/შემოსავლის შეფარდებას.
+        {% else %}
+          ამ პერიოდში სტრატეგია წამგებიანი იყო. ბაზრის პირობები შესაძლოა არ შეესაბამებოდა სტრატეგიას.
+        {% endif %}
+      {% elif r.strategy_id == "rsi_mean_reversion" %}
+        <strong>რა ნიშნავს ეს?</strong><br>
+        RSI (0–100) ზომავს ბაზრის "სიჩქარეს". 30-ზე ქვემოთ — "ზედმეტად გაიაფდა" → ყიდულობს.
+        70-ზე ზემოთ — "ზედმეტად გაძვირდა" → ყიდის.
+        {% if m.total_trades == 0 %}
+          ამ პერიოდში RSI თრეშოლდებს ვერ მიაღწია.
+        {% elif m.total_return_pct > 0 %}
+          სტრატეგია ეფექტური იყო — "ვყიდი, როდესაც ყველა ყიდის" მიდგომა ამ პერიოდში მუშაობდა.
+        {% else %}
+          ტრენდიანი ბაზარი. RSI სტრატეგია ყველაზე კარგად მუშაობს გვერდით (sideways) ბაზარზე.
+        {% endif %}
+      {% endif %}
+      <br>
+      <span style="color:#64748b; font-size:0.9em;">
+        საშ. გამარჯვება: +{{ m.avg_win_pct }}% | საშ. წაგება: {{ m.avg_loss_pct }}%
+      </span>
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

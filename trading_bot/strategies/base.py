@@ -36,3 +36,11 @@ class StrategyBase(ABC):
         bars: DataFrame with columns [open_time, close, high, low, open, volume],
               sorted oldest-first.
         """
+
+    @abstractmethod
+    def backtest_signals(self, bars: pd.DataFrame) -> pd.Series:
+        """Return a Series of 'BUY'/'SELL'/'HOLD' for every bar (no lookahead).
+
+        Signal at index i uses only data[0..i].
+        The backtesting engine executes the trade at bar[i+1]'s open.
+        """

@@ -85,7 +85,17 @@
       <div class="text-gray-500 text-sm animate-pulse">სიგნალები იტვირთება...</div>
     </section>
 
-    <!-- Row 4: Audit Log -->
+    <!-- Row 4: Backtesting Results -->
+    <section
+      id="backtest-section"
+      hx-get="/partials/backtest"
+      hx-trigger="load, every 300s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">Backtesting შედეგები იტვირთება...</div>
+    </section>
+
+    <!-- Row 5: Audit Log -->
     <section
       id="audit-section"
       hx-get="/partials/audit"

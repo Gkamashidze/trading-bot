@@ -73,3 +73,14 @@ class RsiMeanReversionStrategy(StrategyBase):
             indicators={"rsi": round(rsi_now, 2)},
             reason=reason,
         )
+
+    def backtest_signals(self, bars: pd.DataFrame) -> pd.Series:
+        closes = bars["close"].astype(float)
+        rsi_series = compute_rsi(closes, self.period)
+
+        signals = pd.Series("HOLD", index=bars.index, dtype=object)
+        valid = rsi_series.notna()
+
+        signals[valid & (rsi_series <= self.oversold)] = "BUY"
+        signals[valid & (rsi_series >= self.overbought)] = "SELL"
+        return signals

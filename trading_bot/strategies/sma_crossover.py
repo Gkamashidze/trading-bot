@@ -80,3 +80,21 @@ class SmaCrossoverStrategy(StrategyBase):
             },
             reason=reason,
         )
+
+    def backtest_signals(self, bars: pd.DataFrame) -> pd.Series:
+        closes = bars["close"].astype(float)
+        fast_sma = sma(closes, self.fast)
+        slow_sma = sma(closes, self.slow)
+
+        signals = pd.Series("HOLD", index=bars.index, dtype=object)
+
+        fast_prev = fast_sma.shift(1)
+        slow_prev = slow_sma.shift(1)
+        valid = fast_sma.notna() & slow_sma.notna() & fast_prev.notna() & slow_prev.notna()
+
+        crossed_up = valid & (fast_prev <= slow_prev) & (fast_sma > slow_sma)
+        crossed_down = valid & (fast_prev >= slow_prev) & (fast_sma < slow_sma)
+
+        signals[crossed_up] = "BUY"
+        signals[crossed_down] = "SELL"
+        return signals

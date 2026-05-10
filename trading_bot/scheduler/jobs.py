@@ -80,6 +80,17 @@ async def signal_refresh_job() -> None:
     log.info("signal_refresh_job_complete", signals_computed=len(results))
 
 
+async def backtest_refresh_job() -> None:
+    """Re-run backtests against latest Parquet data.
+
+    Runs every 6 hours. Fast (<1s for 500 daily bars).
+    """
+    from trading_bot.backtesting.runner import run_backtests
+
+    results = await run_backtests()
+    log.info("backtest_refresh_job_complete", strategies=len(results))
+
+
 async def daily_ohlcv_ingestion_job(
     exchange_id: str = "binance",
     symbol: str = "BTC/USDT",
@@ -170,6 +181,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         minutes=15,
         id="signal_refresh",
         name="Strategy signal refresh (15 min)",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        backtest_refresh_job,
+        trigger="interval",
+        hours=6,
+        id="backtest_refresh",
+        name="Backtest refresh (6h)",
         replace_existing=True,
     )
 

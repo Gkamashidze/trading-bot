@@ -24,6 +24,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+from trading_bot.backtesting.runner import get_last_backtest_at, get_latest_backtest
 from trading_bot.observability.logging import get_logger
 from trading_bot.strategies.runner import get_last_computed_at, get_latest_signals
 from trading_bot.websocket.price_cache import get_price_cache
@@ -268,6 +269,17 @@ def create_app() -> FastAPI:
         return templates.TemplateResponse(
             request=request,
             name="partials/signals.html",
+            context={"results": results, "computed_at": computed_at},
+        )
+
+    @app.get("/partials/backtest", response_class=HTMLResponse)
+    async def partial_backtest(request: Request) -> HTMLResponse:
+        results = get_latest_backtest()
+        computed_at_dt = get_last_backtest_at()
+        computed_at = computed_at_dt.strftime("%Y-%m-%d %H:%M UTC") if computed_at_dt else None
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/backtest.html",
             context={"results": results, "computed_at": computed_at},
         )
 

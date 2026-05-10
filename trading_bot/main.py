@@ -29,6 +29,7 @@ import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from trading_bot.alerts.telegram import TelegramAlerter
+from trading_bot.backtesting.runner import run_backtests
 from trading_bot.config import get_settings
 from trading_bot.dashboard.app import create_app, init_dashboard
 from trading_bot.database.connection import close_pool, init_pool
@@ -131,9 +132,11 @@ async def _startup() -> tuple[
     else:
         log.warning("scheduler_skipped", reason="DATABASE_URL not configured")
 
-    # ── Strategy signals (initial computation, non-blocking) ─────────────
+    # ── Strategy signals + backtests (initial computation, non-blocking) ───
     _signal_task = asyncio.create_task(refresh_signals(), name="initial_signal_refresh")
     del _signal_task  # fire-and-forget: task runs independently
+    _bt_task = asyncio.create_task(run_backtests(), name="initial_backtest")
+    del _bt_task  # fire-and-forget: task runs independently
     log.info("signal_refresh_scheduled")
 
     # ── WebSocket price feed ──────────────────────────────────────────────
