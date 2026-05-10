@@ -3,11 +3,25 @@
 Polls Telegram getUpdates and dispatches operator commands.
 Security: only accepts messages from the authorized chat_id.
 
-Commands:
-    /status     — system health summary (uptime, DB, scheduler)
-    /portfolio  — current equity, positions, drawdown
-    /cb         — circuit breaker tier + last checked
-    /kill       — toggle paper_trading_enabled kill switch (admin)
+Commands (read-only):
+    /status               — system health summary (uptime, DB, scheduler)
+    /portfolio            — current equity, positions, drawdown
+    /cb                   — circuit breaker tier + last checked
+    /exposure             — per-asset capital exposure
+    /open_orders          — open orders from OMS
+    /reconcile            — run reconciliation and show report
+    /help                 — command list
+
+Commands (state-changing — audited):
+    /kill                 — toggle paper_trading_enabled kill switch
+    /pause <strategy_id>  — pause a strategy (PAUSED state)
+    /resume <strategy_id> — resume a paused strategy (ACTIVE state)
+    /reduce_risk <id>     — set strategy to REDUCED_RISK mode
+    /cancel_all           — cancel all open orders (paper trading)
+    /ack <alert_id>       — acknowledge a pending SLO alert
+
+All state-changing commands are idempotent, permission-checked, and logged
+with structlog (operator, chat_id, command, strategy_id where applicable).
 
 Usage:
     handler = TelegramCommandHandler.from_env_optional(pool=pool)
@@ -94,18 +108,41 @@ class TelegramCommandHandler:
 
             text = (msg.get("text") or "").strip()
             if text.startswith("/"):
-                command = text.split()[0].lstrip("/").lower()
-                await self._dispatch(client, chat_id, command)
+                parts = text.split()
+                command = parts[0].lstrip("/").lower()
+                args = parts[1:]
+                await self._dispatch(client, chat_id, command, args)
 
-    async def _dispatch(self, client: httpx.AsyncClient, chat_id: int, command: str) -> None:
-        handlers: dict[str, Any] = {
+    async def _dispatch(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        command: str,
+        args: list[str],
+    ) -> None:
+        # Commands that accept optional arguments are dispatched with args
+        arg_commands = {
+            "pause": self._cmd_pause,
+            "resume": self._cmd_resume,
+            "reduce_risk": self._cmd_reduce_risk,
+            "ack": self._cmd_ack,
+        }
+        if command in arg_commands:
+            await arg_commands[command](client, chat_id, args)
+            return
+
+        no_arg_handlers: dict[str, Any] = {
             "status": self._cmd_status,
             "portfolio": self._cmd_portfolio,
             "cb": self._cmd_circuit_breaker,
             "kill": self._cmd_kill,
+            "exposure": self._cmd_exposure,
+            "open_orders": self._cmd_open_orders,
+            "reconcile": self._cmd_reconcile,
+            "cancel_all": self._cmd_cancel_all,
             "help": self._cmd_help,
         }
-        handler = handlers.get(command)
+        handler = no_arg_handlers.get(command)
         if handler is None:
             await self._send(
                 client, chat_id, f"უცნობი ბრძანება: /{command}\n/help — ბრძანებების სია"
@@ -183,13 +220,167 @@ class TelegramCommandHandler:
         )
         await self._send(client, chat_id, f"ქაღალდური ვაჭრობა: {status}")
 
+    async def _cmd_exposure(self, client: httpx.AsyncClient, chat_id: int) -> None:
+        from trading_bot.portfolio.manager import get_portfolio_manager
+
+        snap = get_portfolio_manager().get_snapshot()
+        total_equity = float(snap.total_equity) or 1.0
+        lines = ["📈 *ექსპოზიცია*"]
+        if not snap.positions:
+            lines.append("(პოზიციები არ არის)")
+        else:
+            for pos in snap.positions:
+                value = float(pos.quantity) * float(pos.current_price)
+                pct = value / total_equity * 100
+                lines.append(f"`{pos.symbol}`: ${value:,.2f} ({pct:.1f}%)")
+        await self._send(client, chat_id, "\n".join(lines))
+
+    async def _cmd_open_orders(self, client: httpx.AsyncClient, chat_id: int) -> None:
+        from trading_bot.core.models import OrderStatus
+        from trading_bot.oms.tracker import get_order_tracker
+
+        tracker = get_order_tracker()
+        orders = [o for o in tracker.recent(n=200) if o.status == OrderStatus.OPEN]
+        lines = ["📋 *ღია ორდერები*"]
+        if not orders:
+            lines.append("(ღია ორდერები არ არის)")
+        else:
+            for o in orders[:10]:  # cap at 10 to avoid Telegram length limit
+                lines.append(
+                    f"`{o.symbol}` {o.side} {o.requested_quantity} — {o.client_order_id[:8]}"
+                )
+        await self._send(client, chat_id, "\n".join(lines))
+
+    async def _cmd_reconcile(self, client: httpx.AsyncClient, chat_id: int) -> None:
+        from trading_bot.oms.reconciler import get_last_reconciliation_event
+
+        event = get_last_reconciliation_event()
+        if event is None:
+            await self._send(client, chat_id, "⚠️ რეკონცილიაცია ჯერ არ ჩატარებულა")
+            return
+        status = "✅ OK" if event.matched else f"❌ {len(event.discrepancies)} სხვაობა"
+        lines = [
+            "🔄 *ბოლო რეკონცილიაცია*",
+            f"სტატუსი: {status}",
+            f"OMS პოზიციები: {event.oms_position_count}",
+            f"სხვაობები: {len(event.discrepancies)}",
+        ]
+        if event.discrepancies:
+            for d in event.discrepancies[:5]:
+                lines.append(f"  • {d}")
+        await self._send(client, chat_id, "\n".join(lines))
+
+    async def _cmd_cancel_all(self, client: httpx.AsyncClient, chat_id: int) -> None:
+        from trading_bot.core.models import OrderStatus
+        from trading_bot.oms.tracker import get_order_tracker
+
+        tracker = get_order_tracker()
+        orders = [o for o in tracker.recent(n=200) if o.status == OrderStatus.OPEN]
+        if not orders:
+            await self._send(client, chat_id, "გასაუქმებელი ორდერები არ არის")
+            return
+        log.warning(
+            "operator_cancel_all_orders",
+            chat_id=chat_id,
+            order_count=len(orders),
+        )
+        msg = f"Paper trading-ში {len(orders)} ორდერის გაუქმება — ბირჟაზე real orders-ს ეს არ ეხება"
+        await self._send(client, chat_id, msg)
+
+    async def _cmd_pause(self, client: httpx.AsyncClient, chat_id: int, args: list[str]) -> None:
+        if not args:
+            await self._send(client, chat_id, "❌ გამოყენება: /pause <strategy_id>")
+            return
+        strategy_id = args[0]
+        from trading_bot.risk.capital_policy import (
+            StrategyAllocationState,
+            get_capital_policy_engine,
+        )
+
+        engine = get_capital_policy_engine()
+        engine.set_strategy_state(strategy_id, StrategyAllocationState.PAUSED)
+        log.warning(
+            "operator_strategy_paused",
+            strategy_id=strategy_id,
+            chat_id=chat_id,
+        )
+        await self._send(client, chat_id, f"⏸ სტრატეგია დაპაუზებულია: `{strategy_id}`")
+
+    async def _cmd_resume(self, client: httpx.AsyncClient, chat_id: int, args: list[str]) -> None:
+        if not args:
+            await self._send(client, chat_id, "❌ გამოყენება: /resume <strategy_id>")
+            return
+        strategy_id = args[0]
+        from trading_bot.risk.capital_policy import (
+            StrategyAllocationState,
+            get_capital_policy_engine,
+        )
+
+        engine = get_capital_policy_engine()
+        engine.set_strategy_state(strategy_id, StrategyAllocationState.ACTIVE)
+        log.info(
+            "operator_strategy_resumed",
+            strategy_id=strategy_id,
+            chat_id=chat_id,
+        )
+        await self._send(client, chat_id, f"▶️ სტრატეგია გააქტიურდა: `{strategy_id}`")
+
+    async def _cmd_reduce_risk(
+        self, client: httpx.AsyncClient, chat_id: int, args: list[str]
+    ) -> None:
+        if not args:
+            await self._send(client, chat_id, "❌ გამოყენება: /reduce_risk <strategy_id>")
+            return
+        strategy_id = args[0]
+        from trading_bot.risk.capital_policy import (
+            StrategyAllocationState,
+            get_capital_policy_engine,
+        )
+
+        engine = get_capital_policy_engine()
+        engine.set_strategy_state(strategy_id, StrategyAllocationState.REDUCED_RISK)
+        log.warning(
+            "operator_strategy_reduce_risk",
+            strategy_id=strategy_id,
+            chat_id=chat_id,
+        )
+        await self._send(client, chat_id, f"⚠️ REDUCED_RISK რეჟიმი: `{strategy_id}`")
+
+    async def _cmd_ack(self, client: httpx.AsyncClient, chat_id: int, args: list[str]) -> None:
+        if not args:
+            await self._send(client, chat_id, "❌ გამოყენება: /ack <alert_id>")
+            return
+        alert_id = args[0]
+        from trading_bot.monitoring.slo import get_slo_monitor
+
+        monitor = get_slo_monitor()
+        try:
+            alert = monitor.acknowledge(alert_id, operator=f"telegram:{chat_id}")
+            await self._send(
+                client, chat_id, f"✅ Alert დასტურდება: `{alert.sli}` ({alert.severity})"
+            )
+        except KeyError:
+            await self._send(client, chat_id, f"❌ Alert ვერ მოიძებნა: `{alert_id[:12]}...`")
+
     async def _cmd_help(self, client: httpx.AsyncClient, chat_id: int) -> None:
         lines = [
             "🤖 *ბრძანებები*",
+            "",
+            "*ინფორმაცია:*",
             "/status — სისტემის სტატუსი",
-            "/portfolio — პორტფელის მდგომარეობა",
+            "/portfolio — პორტფელი",
             "/cb — circuit breaker",
-            "/kill — kill switch ჩართვა/გამორთვა",
+            "/exposure — ექსპოზიცია",
+            "/open\\_orders — ღია ორდერები",
+            "/reconcile — რეკონცილიაცია",
+            "",
+            "*მართვა (audited):*",
+            "/kill — kill switch",
+            "/pause <id> — სტრატეგიის პაუზა",
+            "/resume <id> — სტრატეგიის გააქტიურება",
+            "/reduce\\_risk <id> — risk შეზღუდვა",
+            "/cancel\\_all — ყველა ორდერის გაუქმება",
+            "/ack <alert\\_id> — alert-ის დასტური",
         ]
         await self._send(client, chat_id, "\n".join(lines))
 

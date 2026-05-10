@@ -10,6 +10,11 @@ Tiers (from PLAN.md):
     LIVE        — full production capital (future Stage 9)
 
 Gate criteria are conservative by design. Tighten before live activation.
+
+Registry gate:
+    Before advancing to any tier, the strategy must have a valid entry in the
+    StrategyRegistry (approved and not expired).  This ensures every promoted
+    strategy has documented provenance and owner sign-off.
 """
 
 from __future__ import annotations
@@ -121,8 +126,21 @@ class StrategyPromotion:
 
         return len(failures) == 0, failures
 
-    def advance(self, metrics: StrategyMetrics) -> PromotionTier | None:
-        """Attempt to advance to the next tier. Returns new tier or None if blocked."""
+    def advance(
+        self,
+        metrics: StrategyMetrics,
+        require_registry: bool = True,
+    ) -> PromotionTier | None:
+        """Attempt to advance to the next tier. Returns new tier or None if blocked.
+
+        If require_registry is True (default), raises RegistryError when the
+        strategy has no valid entry in the governance registry.
+        """
+        if require_registry:
+            from trading_bot.strategies.registry import get_strategy_registry
+
+            get_strategy_registry().require_valid_entry(self.strategy_id)
+
         eligible, _ = self.can_advance(metrics)
         if not eligible:
             return None

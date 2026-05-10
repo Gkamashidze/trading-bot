@@ -77,26 +77,26 @@ class TestCanAdvance:
 class TestAdvance:
     def test_advance_shadow_to_paper(self) -> None:
         promo = StrategyPromotion(strategy_id="sma")
-        new_tier = promo.advance(_good_metrics(PromotionTier.SHADOW))
+        new_tier = promo.advance(_good_metrics(PromotionTier.SHADOW), require_registry=False)
         assert new_tier == PromotionTier.PAPER
         assert promo.current_tier == PromotionTier.PAPER
 
     def test_advance_records_history(self) -> None:
         promo = StrategyPromotion(strategy_id="sma")
-        promo.advance(_good_metrics(PromotionTier.SHADOW))
+        promo.advance(_good_metrics(PromotionTier.SHADOW), require_registry=False)
         assert len(promo.history) == 1
         assert promo.history[0][0] == PromotionTier.SHADOW
 
     def test_advance_returns_none_on_failure(self) -> None:
         promo = StrategyPromotion(strategy_id="sma")
-        result = promo.advance(_bad_metrics())
+        result = promo.advance(_bad_metrics(), require_registry=False)
         assert result is None
         assert promo.current_tier == PromotionTier.SHADOW
 
     def test_sequential_promotion(self) -> None:
         promo = StrategyPromotion(strategy_id="sma")
-        promo.advance(_good_metrics(PromotionTier.SHADOW))
-        promo.advance(_good_metrics(PromotionTier.PAPER))
+        promo.advance(_good_metrics(PromotionTier.SHADOW), require_registry=False)
+        promo.advance(_good_metrics(PromotionTier.PAPER), require_registry=False)
         assert promo.current_tier == PromotionTier.MICRO_LIVE
         assert len(promo.history) == 2
 

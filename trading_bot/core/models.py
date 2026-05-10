@@ -314,7 +314,11 @@ class Signal(BaseModel):
 
 
 class DataLineage(BaseModel):
-    """Lineage metadata attached to every processed dataset."""
+    """Lineage metadata attached to every processed dataset.
+
+    All fields are optional-with-defaults so existing callers that pass only
+    (source, fetched_at, row_count) continue to work without changes.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -327,6 +331,15 @@ class DataLineage(BaseModel):
     checksum: str = ""  # sha256 of raw bytes before processing
     quarantined: bool = False
     quarantine_reason: str | None = None
+
+    # Extended provenance fields (Stage 8+)
+    provider: str = ""  # e.g. "binance", "yfinance", "alpaca"
+    exchange: str = ""  # e.g. "BINANCE", "NYSE"
+    symbol: str = ""  # e.g. "BTC/USDT"
+    timeframe: str = ""  # e.g. "1h", "1d"
+    ingestion_job_id: str = ""  # UUID of the APScheduler job run
+    storage_path: str = ""  # relative path inside data/raw/
+    dataset_snapshot_id: str = ""  # immutable snapshot UUID (see data/lineage.py)
 
 
 # ---------------------------------------------------------------------------

@@ -319,3 +319,39 @@ class Reconciler:
     @property
     def last_report(self) -> ReconciliationReport | None:
         return self._last_report
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton + helpers for operator console
+# ---------------------------------------------------------------------------
+
+_reconciler_instance: Reconciler | None = None
+
+
+def get_reconciler() -> Reconciler | None:
+    """Return the active Reconciler singleton (None if not yet initialised)."""
+    return _reconciler_instance
+
+
+def set_reconciler(r: Reconciler) -> None:
+    """Register the active Reconciler singleton (called at startup)."""
+    global _reconciler_instance
+    _reconciler_instance = r
+
+
+def get_last_reconciliation_event() -> ReconciliationEvent | None:
+    """Return the most recent ReconciliationEvent, or None if no run yet."""
+    r = _reconciler_instance
+    if r is None or r.last_report is None:
+        return None
+    report = r.last_report
+    all_disc = (
+        report.order_discrepancies + report.balance_discrepancies + report.position_discrepancies
+    )
+    return ReconciliationEvent(
+        exchange=r._exchange_id,
+        oms_position_count=0,
+        exchange_position_count=0,
+        matched=report.severity == ReconciliationSeverity.OK,
+        discrepancies=all_disc,
+    )

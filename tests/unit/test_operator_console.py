@@ -143,7 +143,7 @@ class TestCommandDispatch:
         handler = _make_handler()
         client = AsyncMock()
         handler._send = AsyncMock()
-        await handler._dispatch(client, 123456, "unknown_cmd")
+        await handler._dispatch(client, 123456, "unknown_cmd", [])
         text = handler._send.await_args[0][2]
         assert "help" in text or "ბრძანება" in text
 
@@ -203,7 +203,7 @@ class TestPollFiltering:
         )
 
         await handler._poll_once(client)
-        handler._dispatch.assert_awaited_once_with(client, 123456, "status")
+        handler._dispatch.assert_awaited_once_with(client, 123456, "status", [])
 
     @pytest.mark.asyncio
     async def test_offset_updated_after_processing(self) -> None:

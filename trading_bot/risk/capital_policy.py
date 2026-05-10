@@ -123,6 +123,7 @@ class CapitalPolicyEngine:
 
     def __init__(self, config: CapitalPolicyConfig | None = None) -> None:
         self._config = config or CapitalPolicyConfig()
+        self._strategy_states: dict[str, StrategyAllocationState] = {}
 
     def check(
         self,
@@ -168,8 +169,12 @@ class CapitalPolicyEngine:
         strategy_id = order.strategy_id or "__default__"
         policy = config.strategy_policy(strategy_id)
 
+        # Runtime state overrides config state (operator may pause/resume at run time)
+        runtime_state = self._strategy_states.get(strategy_id)
+        effective_state = runtime_state if runtime_state is not None else policy.state
+
         # ── Strategy paused ──────────────────────────────────────────────────
-        if policy.state == StrategyAllocationState.PAUSED:
+        if effective_state == StrategyAllocationState.PAUSED:
             return CapitalPolicyDecision(
                 False,
                 f"strategy '{strategy_id}' is paused — no new entries allowed",
@@ -184,7 +189,7 @@ class CapitalPolicyEngine:
         strategy_exposure = float((strategy_positions_value + new_order_value) / equity)
 
         effective_cap = policy.max_capital_pct
-        if policy.state == StrategyAllocationState.REDUCED_RISK:
+        if effective_state == StrategyAllocationState.REDUCED_RISK:
             effective_cap *= policy.reduced_risk_size_pct
             log.info(
                 "capital_policy_reduced_risk_mode",
@@ -234,6 +239,25 @@ class CapitalPolicyEngine:
         )
         return CapitalPolicyDecision(True, "")
 
+    def set_strategy_state(
+        self,
+        strategy_id: str,
+        state: StrategyAllocationState,
+    ) -> None:
+        """Set the allocation state for a strategy.  Creates a default policy entry
+        if one does not already exist.  Idempotent."""
+        if strategy_id not in self._strategy_states:
+            self._strategy_states[strategy_id] = StrategyAllocationState.ACTIVE
+        self._strategy_states[strategy_id] = state
+        log.info(
+            "strategy_allocation_state_changed",
+            strategy_id=strategy_id,
+            new_state=state,
+        )
+
+    def get_strategy_state(self, strategy_id: str) -> StrategyAllocationState:
+        return self._strategy_states.get(strategy_id, StrategyAllocationState.ACTIVE)
+
     @staticmethod
     def _estimate_fill_price(order: OrderRequest, snapshot: PortfolioSnapshot) -> Decimal:
         """Best-effort fill price for capital calculation.
@@ -251,3 +275,18 @@ class CapitalPolicyEngine:
 
         # No existing position — use cash balance as a proxy floor
         return snapshot.cash_balance / max(snapshot.total_equity, Decimal("1"))
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
+_capital_policy_engine: CapitalPolicyEngine | None = None
+
+
+def get_capital_policy_engine() -> CapitalPolicyEngine:
+    """Return the module-level CapitalPolicyEngine singleton."""
+    global _capital_policy_engine
+    if _capital_policy_engine is None:
+        _capital_policy_engine = CapitalPolicyEngine()
+    return _capital_policy_engine
