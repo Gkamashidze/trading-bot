@@ -7,7 +7,14 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
-    body { font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; }
+    /* Sans-serif for labels/text — monospace only for numbers (.font-mono) */
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; }
+    .font-mono { font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace; }
+
+    /* Contrast fix — body prefix raises specificity above Tailwind CDN injection */
+    body .text-gray-500 { color: rgb(168 178 192); }
+    body .text-gray-600 { color: rgb(130 142 158); }
+    body .text-gray-700 { color: rgb(100 112 128); }
 
     /* ───── tooltip system ─────
        Use:  <span class="tip" data-tip="ახსნა">label ❓</span>
