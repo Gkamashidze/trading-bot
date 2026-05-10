@@ -98,6 +98,7 @@ class BacktestEngine:
 
         return BacktestResult(
             strategy_id=strategy.strategy_id,
+            symbol="BTC/USDT",  # overridden by caller (runner.py)
             config=cfg,
             metrics=metrics,
             equity_curve=equity_s,

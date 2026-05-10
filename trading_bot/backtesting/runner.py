@@ -27,32 +27,40 @@ def get_last_backtest_at() -> datetime | None:
 async def run_backtests() -> list[BacktestResult]:
     global _last_results, _last_computed_at
 
-    bars = _load_bars(max_bars=500)
-    if bars is None or bars.empty:
-        log.warning("backtest_skipped", reason="no bars available")
-        return _last_results
+    from trading_bot.config import get_settings
 
+    crypto = get_settings().trading.crypto
     config = BacktestConfig()
     engine = BacktestEngine(config)
-    results: list[BacktestResult] = []
+    all_results: list[BacktestResult] = []
 
-    for strategy in _STRATEGIES:
-        try:
-            result = engine.run(bars, strategy)
-            results.append(result)
-            m = result.metrics
-            log.info(
-                "backtest_complete",
-                strategy=result.strategy_id,
-                bars=result.n_bars,
-                total_return_pct=m.total_return_pct,
-                sharpe=m.sharpe_ratio,
-                max_dd_pct=m.max_drawdown_pct,
-                trades=m.total_trades,
-            )
-        except Exception as e:
-            log.error("backtest_error", strategy=strategy.strategy_id, error=str(e))
+    for symbol in crypto.symbols:
+        bars = _load_bars(symbol=symbol, max_bars=500)
+        if bars is None or bars.empty:
+            log.warning("backtest_skipped", symbol=symbol, reason="no bars available")
+            continue
 
-    _last_results = results
+        for strategy in _STRATEGIES:
+            try:
+                result = engine.run(bars, strategy)
+                result.symbol = symbol
+                all_results.append(result)
+                m = result.metrics
+                log.info(
+                    "backtest_complete",
+                    symbol=symbol,
+                    strategy=result.strategy_id,
+                    bars=result.n_bars,
+                    total_return_pct=m.total_return_pct,
+                    sharpe=m.sharpe_ratio,
+                    max_dd_pct=m.max_drawdown_pct,
+                    trades=m.total_trades,
+                )
+            except Exception as e:
+                log.error(
+                    "backtest_error", symbol=symbol, strategy=strategy.strategy_id, error=str(e)
+                )
+
+    _last_results = all_results
     _last_computed_at = datetime.now(UTC)
-    return results
+    return all_results

@@ -34,6 +34,7 @@ class BacktestMetrics:
 @dataclass
 class BacktestResult:
     strategy_id: str
+    symbol: str
     config: BacktestConfig
     metrics: BacktestMetrics
     equity_curve: pd.Series
