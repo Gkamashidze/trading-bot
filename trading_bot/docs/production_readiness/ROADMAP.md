@@ -1,16 +1,36 @@
 # Production Readiness Roadmap
-# Last updated: 2026-05-11
+Last updated: 2026-05-11
 
-Gate requirements before micro-live:
-- 30+ days paper trading, 100+ trades, zero CRITICAL reconciliation events
-- Parity score >= 70/100, risk operator sign-off in audit log
+## Gate Requirements Before Micro-Live
+- 30+ calendar days of paper trading
+- 100+ paper trades recorded
+- Zero CRITICAL reconciliation events
+- Parity score >= 70/100
+- Risk operator sign-off in audit log
 
-Fully implemented (9 modules, 107 unit tests):
-  parity/report.py, compliance/pre_trade.py, execution/post_trade.py,
-  promotion/micro_live.py, monitoring/decay.py, state/risk_state.py,
-  exchange/precision.py, exchange/fake_exchange.py, orderbook/models.py
+## Implemented
+- trading_bot/parity/report.py
+- trading_bot/compliance/pre_trade.py
+- trading_bot/execution/post_trade.py
+- trading_bot/promotion/micro_live.py
+- trading_bot/monitoring/decay.py
+- trading_bot/state/risk_state.py
+- trading_bot/exchange/precision.py
+- trading_bot/exchange/fake_exchange.py
+- trading_bot/orderbook/models.py
+107 unit tests, ruff + mypy clean.
 
-Build before micro-live: Postgres RiskStateStore, BinanceOrderBookProvider, GoLiveGate
-Build before live: AuditReplayer, VaR/CVaR, Grafana, pen testing
+## Build Before Micro-Live
+- Postgres RiskStateStore
+- BinanceOrderBookProvider
+- GoLiveGate.evaluate()
 
-Blocked (Stage 5): BinanceExchange.place_order() NotImplementedError
+## Build Before Live
+- AuditReplayer
+- VaR/CVaR metrics
+- Grafana dashboards
+- Penetration testing
+
+## Blocked Until Stage 5
+- BinanceExchange.place_order() raises NotImplementedError
+- replace_order() not implemented
