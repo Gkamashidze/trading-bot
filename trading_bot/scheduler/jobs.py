@@ -143,37 +143,35 @@ async def daily_ohlcv_ingestion_job(
 def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register the default daily ingestion jobs.
 
+    Symbols and timeframes are read from settings.trading.crypto — edit
+    base.yaml (or an env-specific YAML) to add/remove assets without
+    touching this file.
+
     Call after create_scheduler() and before scheduler.start().
     """
-    scheduler.add_job(
-        daily_ohlcv_ingestion_job,
-        trigger="cron",
-        hour=1,
-        minute=0,
-        id="daily_btc_1d",
-        name="Daily BTC/USDT 1d ingestion",
-        replace_existing=True,
-        kwargs={
-            "exchange_id": "binance",
-            "symbol": "BTC/USDT",
-            "timeframe": "1d",
-        },
-    )
+    from trading_bot.config import get_settings
 
-    scheduler.add_job(
-        daily_ohlcv_ingestion_job,
-        trigger="cron",
-        hour=1,
-        minute=15,
-        id="daily_btc_1h",
-        name="Daily BTC/USDT 1h ingestion",
-        replace_existing=True,
-        kwargs={
-            "exchange_id": "binance",
-            "symbol": "BTC/USDT",
-            "timeframe": "1h",
-        },
-    )
+    crypto = get_settings().trading.crypto
+    minute_offset = 0
+    for symbol in crypto.symbols:
+        symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
+        for timeframe in crypto.timeframes:
+            job_id = f"daily_{symbol_safe}_{timeframe}"
+            scheduler.add_job(
+                daily_ohlcv_ingestion_job,
+                trigger="cron",
+                hour=1,
+                minute=minute_offset,
+                id=job_id,
+                name=f"Daily {symbol} {timeframe} ingestion",
+                replace_existing=True,
+                kwargs={
+                    "exchange_id": crypto.exchange,
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                },
+            )
+            minute_offset += 15
 
     scheduler.add_job(
         signal_refresh_job,

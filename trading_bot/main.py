@@ -141,9 +141,10 @@ async def _startup() -> tuple[
 
     # ── WebSocket price feed ──────────────────────────────────────────────
     price_cache = get_price_cache()
-    ws_client = BinanceWebSocketClient(symbols=["BTCUSDT"], on_tick=price_cache.update)
+    ws_symbols = [s.replace("/", "") for s in settings.trading.crypto.symbols]
+    ws_client = BinanceWebSocketClient(symbols=ws_symbols, on_tick=price_cache.update)
     ws_client.start()
-    log.info("websocket_started", symbols=["BTCUSDT"])
+    log.info("websocket_started", symbols=ws_symbols)
 
     # ── Dashboard wiring (pool + scheduler available now) ─────────────────
     init_dashboard(pool=pool, scheduler=scheduler)

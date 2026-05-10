@@ -152,6 +152,28 @@ class DataStorageSettings(BaseSettings):
     raw_path: str = Field(default="data/raw", alias="DATA_PATH")
 
 
+class TradingCryptoSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    exchange: str = "binance"
+    symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT"])
+    timeframes: list[str] = Field(default_factory=lambda: ["1d", "1h"])
+
+
+class TradingEquitySettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    exchange: str = "alpaca"
+    symbols: list[str] = Field(default_factory=lambda: ["SPY", "QQQ", "SOXX"])
+
+
+class TradingSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    crypto: TradingCryptoSettings = Field(default_factory=TradingCryptoSettings)
+    equity: TradingEquitySettings = Field(default_factory=TradingEquitySettings)
+
+
 # ---------------------------------------------------------------------------
 # Root settings
 # ---------------------------------------------------------------------------
@@ -186,6 +208,7 @@ class Settings(BaseSettings):
     binance: BinanceExchangeSettings = Field(default_factory=BinanceExchangeSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     storage: DataStorageSettings = Field(default_factory=DataStorageSettings)
+    trading: TradingSettings = Field(default_factory=TradingSettings)
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -245,7 +268,7 @@ def _load_settings() -> Settings:
     # For YAML-sourced defaults we instantiate nested models directly.
     nested_overrides: dict[str, Any] = {}
 
-    for key in ("logging", "database", "otel", "prometheus", "risk", "time_sync"):
+    for key in ("logging", "database", "otel", "prometheus", "risk", "time_sync", "trading"):
         if key in yaml_defaults:
             nested_overrides[key] = yaml_defaults[key]
 

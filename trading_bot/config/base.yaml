@@ -105,3 +105,18 @@ audit_log:
   hash_algorithm: "sha256"
   # Retention — enforced by DB partition policy
   retention_days: 365
+
+trading:
+  crypto:
+    exchange: "binance"
+    symbols:
+      - "BTC/USDT"
+    timeframes:
+      - "1d"
+      - "1h"
+  equity:
+    exchange: "alpaca"
+    symbols:
+      - "SPY"
+      - "QQQ"
+      - "SOXX"

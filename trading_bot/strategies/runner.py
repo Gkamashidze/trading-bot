@@ -85,7 +85,10 @@ async def refresh_signals() -> list[StrategyResult]:
     """
     global _last_results, _last_computed_at
 
-    bars = _load_bars()
+    crypto = get_settings().trading.crypto
+    bars = _load_bars(
+        exchange=crypto.exchange, symbol=crypto.symbols[0], timeframe=crypto.timeframes[0]
+    )
     if bars is None or bars.empty:
         log.warning("signal_refresh_skipped", reason="no bars available")
         return _last_results
