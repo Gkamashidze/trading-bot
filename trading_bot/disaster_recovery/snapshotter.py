@@ -130,3 +130,105 @@ def prune_old_snapshots(
     if to_delete:
         log.info("snapshots_pruned", removed=len(to_delete), kept=keep_last)
     return len(to_delete)
+
+
+# ---------------------------------------------------------------------------
+# Disaster Recovery Rehearsal — Feature #10
+# ---------------------------------------------------------------------------
+
+import time  # noqa: E402
+import uuid  # noqa: E402
+
+# RPO/RTO targets
+RPO_TARGET_MINUTES: int = 60  # max data age we tolerate on recovery
+RTO_TARGET_SECONDS: int = 300  # max time to restore from snapshot
+
+
+@dataclass
+class DrillResult:
+    """Result of a single restore-drill run."""
+
+    drill_id: str
+    started_at: str  # ISO-8601 UTC
+    finished_at: str  # ISO-8601 UTC
+    rto_seconds: float  # measured restore time
+    rpo_minutes: float  # age of the restored snapshot in minutes
+    rto_passed: bool
+    rpo_passed: bool
+    notes: str = ""
+
+    @property
+    def passed(self) -> bool:
+        return self.rto_passed and self.rpo_passed
+
+
+_drill_history: list[DrillResult] = []
+
+
+def run_restore_drill(
+    directory: Path = _DEFAULT_SNAPSHOT_DIR,
+) -> DrillResult:
+    """Execute a restore drill: measure RTO and validate RPO against targets.
+
+    Does NOT modify live state — it only reads the snapshot from disk.
+    """
+    drill_id = str(uuid.uuid4())
+    start_ts = datetime.now(UTC)
+    t0 = time.monotonic()
+
+    snap = restore_latest_snapshot(directory=directory)
+
+    elapsed = time.monotonic() - t0
+    end_ts = datetime.now(UTC)
+
+    if snap is None:
+        result = DrillResult(
+            drill_id=drill_id,
+            started_at=start_ts.isoformat(),
+            finished_at=end_ts.isoformat(),
+            rto_seconds=elapsed,
+            rpo_minutes=float("inf"),
+            rto_passed=False,
+            rpo_passed=False,
+            notes="No snapshot found in directory",
+        )
+        _drill_history.append(result)
+        log.warning("dr_drill_no_snapshot", drill_id=drill_id, directory=str(directory))
+        return result
+
+    # Calculate how old the snapshot is
+    captured_at = datetime.fromisoformat(snap.captured_at)
+    age_minutes = (end_ts - captured_at).total_seconds() / 60.0
+
+    rto_passed = elapsed <= RTO_TARGET_SECONDS
+    rpo_passed = age_minutes <= RPO_TARGET_MINUTES
+
+    notes = []
+    if not rto_passed:
+        notes.append(f"RTO exceeded: {elapsed:.1f}s > {RTO_TARGET_SECONDS}s target")
+    if not rpo_passed:
+        notes.append(f"RPO exceeded: {age_minutes:.1f}min > {RPO_TARGET_MINUTES}min target")
+
+    result = DrillResult(
+        drill_id=drill_id,
+        started_at=start_ts.isoformat(),
+        finished_at=end_ts.isoformat(),
+        rto_seconds=round(elapsed, 3),
+        rpo_minutes=round(age_minutes, 2),
+        rto_passed=rto_passed,
+        rpo_passed=rpo_passed,
+        notes="; ".join(notes) if notes else "All targets met",
+    )
+    _drill_history.append(result)
+    log.info(
+        "dr_drill_complete",
+        drill_id=drill_id,
+        passed=result.passed,
+        rto_seconds=result.rto_seconds,
+        rpo_minutes=result.rpo_minutes,
+    )
+    return result
+
+
+def get_drill_history() -> list[DrillResult]:
+    return list(_drill_history)
