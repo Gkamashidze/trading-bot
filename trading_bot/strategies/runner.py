@@ -1,9 +1,9 @@
 """Strategy runner — loads bars from Parquet and runs all registered strategies.
 
 Data flow:
-    Parquet files (/data/raw/binance/BTC_USDT/1d/) → DataFrame → strategies → cache
+    Parquet files (/data/raw/binance/<SYMBOL>/<TF>/) → DataFrame → strategies → cache
 
-The in-memory cache holds the last computed StrategyResult list.
+The in-memory cache holds the last computed StrategyResult list (all symbols).
 The APScheduler calls refresh_signals() every 15 minutes.
 The dashboard reads get_latest_signals() on each partial reload.
 """
@@ -80,51 +80,58 @@ def _load_bars(
 
 
 async def refresh_signals() -> list[StrategyResult]:
-    """Load latest bars and recompute all strategy signals.
+    """Load latest bars for every configured symbol and recompute all strategy signals.
 
     Safe to call concurrently — last writer wins on the cache.
     """
     global _last_results, _last_computed_at
 
     crypto = get_settings().trading.crypto
-    bars = _load_bars(
-        exchange=crypto.exchange, symbol=crypto.symbols[0], timeframe=crypto.timeframes[0]
-    )
-    if bars is None or bars.empty:
-        log.warning("signal_refresh_skipped", reason="no bars available")
-        return _last_results
-
-    results: list[StrategyResult] = []
-    for strategy in _STRATEGIES:
-        try:
-            result = strategy.compute(bars)
-            results.append(result)
-            log.info(
-                "signal_computed",
-                strategy=result.strategy_id,
-                signal=result.signal,
-                strength=result.strength,
-                bars=result.bars_used,
-            )
-        except Exception as e:
-            log.error("strategy_compute_error", strategy=strategy.strategy_id, error=str(e))
-
     ctx = get_market_context()
-    if ctx is not None:
-        results = _apply_context(results, ctx)
+    all_results: list[StrategyResult] = []
 
-    _last_results = results
+    for symbol in crypto.symbols:
+        bars = _load_bars(exchange=crypto.exchange, symbol=symbol, timeframe=crypto.timeframes[0])
+        if bars is None or bars.empty:
+            log.warning("signal_refresh_skipped", symbol=symbol, reason="no bars available")
+            continue
+
+        for strategy in _STRATEGIES:
+            try:
+                result = strategy.compute(bars)
+                result = result.model_copy(update={"symbol": symbol})
+                all_results.append(result)
+                log.info(
+                    "signal_computed",
+                    symbol=symbol,
+                    strategy=result.strategy_id,
+                    signal=result.signal,
+                    strength=result.strength,
+                    bars=result.bars_used,
+                )
+            except Exception as e:
+                log.error(
+                    "strategy_compute_error",
+                    symbol=symbol,
+                    strategy=strategy.strategy_id,
+                    error=str(e),
+                )
+
+    if ctx is not None:
+        all_results = _apply_context(all_results, ctx)
+
+    _last_results = all_results
     _last_computed_at = datetime.now(UTC)
 
     # Route signals to paper exchange (lazy import avoids circular dependency)
     try:
         from trading_bot.execution.router import route_signals
 
-        await route_signals(results)
+        await route_signals(all_results)
     except Exception as e:
         log.error("paper_routing_error", error=str(e))
 
-    return results
+    return all_results
 
 
 def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[StrategyResult]:

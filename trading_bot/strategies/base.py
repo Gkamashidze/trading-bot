@@ -15,6 +15,7 @@ class StrategyResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     strategy_id: str
+    symbol: str = "BTC/USDT"
     signal: str  # "BUY" | "SELL" | "HOLD"
     strength: float = Field(ge=0.0, le=1.0)
     computed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

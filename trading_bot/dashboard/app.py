@@ -223,8 +223,10 @@ def create_app() -> FastAPI:
 
         from trading_bot.config import get_settings
 
-        raw_path = Path(get_settings().storage.raw_path)
-        parquet_dir = raw_path / "binance" / "BTC_USDT" / "1d"
+        settings = get_settings()
+        raw_path = Path(settings.storage.raw_path)
+        primary_symbol = settings.trading.crypto.symbols[0].replace("/", "_")
+        parquet_dir = raw_path / "binance" / primary_symbol / "1d"
 
         bar_count = 0
         date_from: str | None = None
@@ -331,7 +333,10 @@ def create_app() -> FastAPI:
 
     @app.get("/partials/prices", response_class=HTMLResponse)
     async def partial_prices(request: Request) -> HTMLResponse:
-        tick = get_price_cache().get("BTCUSDT")
+        from trading_bot.config import get_settings
+
+        primary_ws = get_settings().trading.crypto.symbols[0].replace("/", "").upper()
+        tick = get_price_cache().get(primary_ws)
         return templates.TemplateResponse(
             request=request,
             name="partials/prices.html",

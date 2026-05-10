@@ -115,6 +115,7 @@ trading:
     exchange: "binance"
     symbols:
       - "BTC/USDT"
+      - "ETH/USDT"
     timeframes:
       - "1d"
       - "1h"

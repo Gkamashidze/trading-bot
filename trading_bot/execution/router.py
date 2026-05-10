@@ -34,15 +34,13 @@ from trading_bot.strategies.base import StrategyResult
 
 log = get_logger(__name__)
 
-# Symbol: "BTC/USDT" in position/order models, "BTCUSDT" in WebSocket
-_ORDER_SYMBOL = "BTC/USDT"
 _POSITION_FRACTION = Decimal("0.20")  # invest 20% of available cash per BUY
 _MIN_ORDER_VALUE = Decimal("10")  # skip orders worth less than $10
 
 _risk = RiskEngine()
 _exchange = PaperExchange()
 
-# Last observed signal per strategy — used to detect signal transitions
+# Last observed signal keyed by "symbol:strategy_id" — detects signal transitions per asset
 _last_signal: dict[str, str] = {}
 
 
@@ -69,8 +67,9 @@ async def route_signal(result: StrategyResult) -> None:
         )
         return
 
-    prev = _last_signal.get(result.strategy_id, "HOLD")
-    _last_signal[result.strategy_id] = result.signal
+    signal_key = f"{result.symbol}:{result.strategy_id}"
+    prev = _last_signal.get(signal_key, "HOLD")
+    _last_signal[signal_key] = result.signal
 
     if result.signal not in ("BUY", "SELL"):
         return
@@ -89,10 +88,14 @@ async def route_signal(result: StrategyResult) -> None:
     # ── Resolve current price from WebSocket ─────────────────────────────────
     from trading_bot.websocket.price_cache import get_price_cache
 
-    tick = get_price_cache().get("BTCUSDT")
+    ws_symbol = result.symbol.replace("/", "").upper()  # "ETH/USDT" → "ETHUSDT"
+    tick = get_price_cache().get(ws_symbol)
     if tick is None:
         log.warning(
-            "router_no_price", symbol="BTCUSDT", signal=result.signal, strategy=result.strategy_id
+            "router_no_price",
+            symbol=ws_symbol,
+            signal=result.signal,
+            strategy=result.strategy_id,
         )
         return
 
@@ -107,9 +110,13 @@ async def route_signal(result: StrategyResult) -> None:
             return
         quantity = (invest / fill_price).quantize(Decimal("0.000001"))
     else:
-        pos = next((p for p in snapshot.positions if p.symbol == _ORDER_SYMBOL), None)
+        pos = next((p for p in snapshot.positions if p.symbol == result.symbol), None)
         if pos is None:
-            log.debug("router_no_position_to_sell", strategy=result.strategy_id)
+            log.debug(
+                "router_no_position_to_sell",
+                symbol=result.symbol,
+                strategy=result.strategy_id,
+            )
             return
         quantity = pos.quantity
 
@@ -117,7 +124,7 @@ async def route_signal(result: StrategyResult) -> None:
         return
 
     order = OrderRequest(
-        symbol=_ORDER_SYMBOL,
+        symbol=result.symbol,
         exchange=ExchangeId.BINANCE,
         side=side,
         order_type=OrderType.MARKET,
