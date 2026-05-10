@@ -15,20 +15,22 @@ RUN uv sync --frozen --no-dev --no-install-project
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
-# Non-root user (security: containers should not run as root)
-RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
-
-# Pre-create the data directory so Railway Volume mounts with correct ownership
-RUN mkdir -p /data/raw && chown -R appuser:appgroup /data
+# gosu: drops root privileges in entrypoint after fixing Volume ownership
+# Non-root user for runtime security
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
 
 # Copy installed packages from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy source + alembic config
+# Copy source + alembic config + entrypoint
 COPY trading_bot/ ./trading_bot/
 COPY --from=builder /app/alembic.ini ./
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Activate venv; PYTHONPATH ensures trading_bot is importable from /app
 ENV PATH="/app/.venv/bin:$PATH"
@@ -36,9 +38,7 @@ ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Health check endpoint served by the dashboard (added in Step 3)
 EXPOSE 8000
 
-USER appuser
-
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "trading_bot.main"]
