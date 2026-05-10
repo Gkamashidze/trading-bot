@@ -18,13 +18,16 @@ Routes:
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import APIKeyHeader
 from fastapi.templating import Jinja2Templates
 
 from trading_bot.backtesting.runner import get_last_backtest_at, get_latest_backtest
@@ -38,6 +41,9 @@ log = get_logger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+_ALLOWED_SYMBOLS = {"BTC/USDT", "ETH/USDT"}
+_ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
 
 # Set by init_dashboard() after DB + scheduler are ready
 _pool: Any = None
@@ -64,8 +70,30 @@ def init_dashboard(pool: Any, scheduler: Any) -> None:
     _scheduler = scheduler
 
 
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _require_api_key(api_key: str | None = Security(_api_key_header)) -> None:
+    """Protect state-changing endpoints with an API key.
+
+    Set DASHBOARD_API_KEY env var. If unset, auth is disabled (dev mode only).
+    """
+    expected = os.environ.get("DASHBOARD_API_KEY", "")
+    if expected and api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Trading Bot Dashboard", docs_url=None, redoc_url=None)
+
+    # CORS — restrict to configured origin in production
+    allowed_origins = os.environ.get("DASHBOARD_ALLOWED_ORIGIN", "*").split(",")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["X-API-Key"],
+    )
 
     @app.get("/health", response_class=JSONResponse)
     async def health() -> dict[str, Any]:
@@ -190,7 +218,9 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/flags/{name}/toggle", response_class=HTMLResponse)
-    async def toggle_flag(name: str, request: Request) -> HTMLResponse:
+    async def toggle_flag(
+        name: str, request: Request, _auth: None = Depends(_require_api_key)
+    ) -> HTMLResponse:
         if _pool is None:
             return HTMLResponse("<p class='text-red-500'>DB not connected</p>", status_code=503)
         try:
@@ -205,6 +235,18 @@ def create_app() -> FastAPI:
             if row is None:
                 return HTMLResponse("<p class='text-red-500'>Flag not found</p>", status_code=404)
             log.info("feature_flag_toggled", flag=name, enabled=row["enabled"])
+            # Write to hash-chained audit log (S4 — compliance trail)
+            try:
+                from trading_bot.database.audit_log import PostgresAuditLog
+
+                audit = PostgresAuditLog(_pool)
+                await audit.append(
+                    event_type="feature_flag_toggled",
+                    payload={"flag": name, "enabled": row["enabled"]},
+                    actor="dashboard",
+                )
+            except Exception as audit_err:
+                log.warning("flag_toggle_audit_failed", flag=name, error=str(audit_err))
             flags = [dict(row)]
         except Exception as e:
             log.error("flag_toggle_failed", flag=name, error=str(e))
@@ -272,7 +314,9 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/admin/backfill", response_class=JSONResponse)
-    async def trigger_backfill(request: Request) -> JSONResponse:
+    async def trigger_backfill(
+        request: Request, _auth: None = Depends(_require_api_key)
+    ) -> JSONResponse:
         """Start a historical OHLCV backfill as a background task.
 
         Query params: symbol (default BTC/USDT), timeframe (default 1d),
@@ -288,7 +332,20 @@ def create_app() -> FastAPI:
         params = dict(request.query_params)
         symbol = params.get("symbol", "BTC/USDT")
         timeframe = params.get("timeframe", "1d")
-        days_back = int(params.get("days_back", 730))
+        try:
+            days_back = max(1, min(1095, int(params.get("days_back", 730))))
+        except (ValueError, TypeError):
+            days_back = 730
+
+        if symbol not in _ALLOWED_SYMBOLS:
+            return JSONResponse(
+                {"error": f"symbol must be one of {sorted(_ALLOWED_SYMBOLS)}"}, status_code=400
+            )
+        if timeframe not in _ALLOWED_TIMEFRAMES:
+            return JSONResponse(
+                {"error": f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}"},
+                status_code=400,
+            )
 
         async def _run_backfill() -> None:
             global _backfill_status

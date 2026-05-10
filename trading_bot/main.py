@@ -39,6 +39,7 @@ from trading_bot.idempotency.store import PostgresIdempotencyStore
 from trading_bot.observability.logging import configure_logging, get_logger
 from trading_bot.observability.metrics import start_metrics_server
 from trading_bot.observability.tracing import configure_tracing
+from trading_bot.oms.tracker import init_tracker
 from trading_bot.scheduler.jobs import create_scheduler, register_default_jobs
 from trading_bot.strategies.runner import refresh_signals
 from trading_bot.utils.signals import register_shutdown_handlers, wait_for_shutdown
@@ -111,6 +112,10 @@ async def _startup() -> tuple[
         # Idempotency store
         idem_store = PostgresIdempotencyStore(pool)
         set_idem_store(idem_store)
+
+        # OMS tracker — wire pool and rehydrate order history from DB
+        tracker = init_tracker(pool)
+        await tracker.load_recent()
     else:
         pool = None
         log.warning(

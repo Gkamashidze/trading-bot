@@ -224,7 +224,7 @@ omit = [
 # Stage 0: unit-testable code covers domain models + validation.
 # DB/exchange/infra modules are excluded above (need integration tests + live services).
 # Threshold rises as integration tests are added in later stages.
-fail_under = 30
+fail_under = 50
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

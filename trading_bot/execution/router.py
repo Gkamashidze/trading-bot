@@ -15,6 +15,7 @@ Signal-change tracking prevents buying repeatedly while already positioned.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from trading_bot.core.models import (
@@ -26,6 +27,7 @@ from trading_bot.core.models import (
     OrderType,
 )
 from trading_bot.execution.paper import PaperExchange
+from trading_bot.idempotency.keys import idempotency_key_for_order
 from trading_bot.observability.logging import get_logger
 from trading_bot.oms.tracker import get_order_tracker
 from trading_bot.portfolio.manager import get_portfolio_manager
@@ -123,6 +125,16 @@ async def route_signal(result: StrategyResult) -> None:
     if quantity <= 0:
         return
 
+    # Deterministic idempotency key — same signal within same UTC day → one order max.
+    # Prevents duplicate orders if scheduler fires twice (e.g. coalesce miss or restart).
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    idem_key = idempotency_key_for_order(
+        strategy_id=result.strategy_id,
+        symbol=result.symbol,
+        side=side.value,
+        signal_id=today,
+    )
+
     order = OrderRequest(
         symbol=result.symbol,
         exchange=ExchangeId.BINANCE,
@@ -130,6 +142,7 @@ async def route_signal(result: StrategyResult) -> None:
         order_type=OrderType.MARKET,
         quantity=quantity,
         strategy_id=result.strategy_id,
+        idempotency_key=idem_key,
     )
 
     # ── Risk check ───────────────────────────────────────────────────────────
@@ -156,6 +169,21 @@ async def route_signal(result: StrategyResult) -> None:
             )
         )
         return
+
+    # ── Idempotency gate — block duplicate orders across restarts ────────────
+    from trading_bot.idempotency.decorator import _default_store as _idem_store
+
+    if _idem_store is not None:
+        acquired = await _idem_store.acquire(idem_key)
+        if not acquired:
+            log.info(
+                "router_idempotency_skip",
+                strategy=result.strategy_id,
+                symbol=result.symbol,
+                side=side.value,
+                key_prefix=idem_key[:8],
+            )
+            return
 
     # ── Execute on paper exchange ────────────────────────────────────────────
     try:

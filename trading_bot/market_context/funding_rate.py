@@ -5,7 +5,7 @@ Cached for 8 hours. Uses the public premiumIndex endpoint — no API key needed.
 
 Interpretation:
   positive funding → longs pay shorts → market is overleveraged long → mild bearish
-  negative funding → shorts pay longs → market is overleveraged short → mild bullish
+  negative funding → shorts pay longs → market is overleveraged short → uncertain/cautious
 """
 
 from __future__ import annotations
@@ -45,6 +45,15 @@ class FundingRateProvider:
                 self._expires_at = now + _TTL
                 log.info("funding_rate_fetched", symbol=symbol, rate=self._rate)
         except Exception as e:
-            log.warning("funding_rate_fetch_failed", symbol=symbol, error=str(e))
+            log.error("funding_rate_fetch_failed", symbol=symbol, error=str(e))
+            await _send_context_alert("Funding Rate API failure", str(e))
 
         return self._rate
+
+
+async def _send_context_alert(title: str, detail: str) -> None:
+    from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+    alerter = TelegramAlerter.from_env_optional()
+    if alerter:
+        await alerter.send(AlertLevel.ERROR, title, detail=detail[:300])

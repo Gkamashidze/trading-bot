@@ -68,7 +68,8 @@ class MacroProvider:
             if obs and obs[0]["value"] != ".":
                 return float(obs[0]["value"])
         except Exception as e:
-            log.warning("fred_fedfunds_failed", error=str(e))
+            log.error("fred_fedfunds_failed", error=str(e))
+            await _send_context_alert("FRED Fed Funds Rate API failure", str(e))
         return None
 
     async def _fetch_cpi_yoy(self, client: httpx.AsyncClient) -> float | None:
@@ -90,5 +91,14 @@ class MacroProvider:
                 year_ago = float(obs[12]["value"])
                 return round((latest / year_ago - 1) * 100, 2)
         except Exception as e:
-            log.warning("fred_cpi_failed", error=str(e))
+            log.error("fred_cpi_failed", error=str(e))
+            await _send_context_alert("FRED CPI API failure", str(e))
         return None
+
+
+async def _send_context_alert(title: str, detail: str) -> None:
+    from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+    alerter = TelegramAlerter.from_env_optional()
+    if alerter:
+        await alerter.send(AlertLevel.ERROR, title, detail=detail[:300])

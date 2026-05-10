@@ -181,6 +181,24 @@ async def daily_portfolio_reset_job() -> None:
     log.info("daily_portfolio_reset_job_complete")
 
 
+async def promotion_evaluation_job() -> None:
+    """Evaluate promotion gates for all registered strategies. Runs daily.
+
+    Results are logged only — no auto-promotion. Operator must confirm via Telegram.
+    Requires the paper_orders table to exist (migration 0003).
+    """
+    from trading_bot.database.connection import get_pool
+    from trading_bot.promotion.pipeline import evaluate_promotion_gates
+
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        log.warning("promotion_evaluation_skipped", reason="no_db_pool")
+        return
+    await evaluate_promotion_gates(pool)
+    log.info("promotion_evaluation_job_complete")
+
+
 async def state_snapshot_job() -> None:
     """Capture and persist portfolio + circuit breaker state. Runs every hour.
 
@@ -290,6 +308,16 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         minutes=60,
         id="state_snapshot",
         name="Hourly portfolio state snapshot (disaster recovery)",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        promotion_evaluation_job,
+        trigger="cron",
+        hour=2,
+        minute=0,
+        id="promotion_evaluation",
+        name="Daily promotion gate evaluation (02:00 UTC)",
         replace_existing=True,
     )
 

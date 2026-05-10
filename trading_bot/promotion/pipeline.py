@@ -159,3 +159,116 @@ def get_promotion(strategy_id: str) -> StrategyPromotion | None:
 
 def get_all_promotions() -> list[StrategyPromotion]:
     return list(_registry.values())
+
+
+async def collect_strategy_metrics(strategy_id: str, pool: object) -> StrategyMetrics | None:
+    """Query paper_orders table and compute point-in-time metrics for a strategy.
+
+    Returns None if insufficient data exists (< 5 trades).
+    """
+    import math
+    from typing import Any
+
+    try:
+        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+            rows = await conn.fetch(
+                """
+                SELECT side, fill_price, requested_qty,
+                       created_at, status
+                FROM paper_orders
+                WHERE strategy_id = $1
+                  AND status IN ('filled', 'rejected')
+                ORDER BY created_at ASC
+                """,
+                strategy_id,
+            )
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    filled = [r for r in rows if r["status"] == "filled"]
+    total_trades = len(rows)
+    if total_trades < 5:
+        return None
+
+    # days_running — elapsed since first order
+    first_at: Any = rows[0]["created_at"]
+    days_running = max(1, (datetime.now(UTC) - first_at).days)
+
+    # win_rate — buy followed by sell at higher price (simplified: compare fill prices)
+    wins = 0
+    buys: list[tuple[float, float]] = []  # (price, qty)
+    for row in filled:
+        if row["side"] == "buy" and row["fill_price"]:
+            buys.append((float(row["fill_price"]), float(row["requested_qty"] or 0)))
+        elif row["side"] == "sell" and row["fill_price"] and buys:
+            buy_price, _ = buys.pop(0)
+            if float(row["fill_price"]) > buy_price:
+                wins += 1
+
+    sell_count = sum(1 for r in filled if r["side"] == "sell")
+    win_rate = wins / sell_count if sell_count > 0 else 0.0
+
+    # sharpe — approximate from daily fill price changes (simplified)
+    if len(filled) >= 2:
+        prices = [float(r["fill_price"]) for r in filled if r["fill_price"]]
+        if len(prices) >= 2:
+            returns = [(prices[i] - prices[i - 1]) / prices[i - 1] for i in range(1, len(prices))]
+            mean_r = sum(returns) / len(returns)
+            variance = sum((r - mean_r) ** 2 for r in returns) / len(returns)
+            std_r = math.sqrt(variance) if variance > 0 else 0.001
+            sharpe = (mean_r / std_r) * math.sqrt(252) if std_r > 0 else 0.0
+        else:
+            sharpe = 0.0
+    else:
+        sharpe = 0.0
+
+    # max_drawdown from portfolio snapshot (use 0 if unavailable)
+    from trading_bot.portfolio.manager import get_portfolio_manager
+
+    snapshot = get_portfolio_manager().get_snapshot()
+    max_drawdown = abs(float(snapshot.daily_drawdown_pct))
+
+    return StrategyMetrics(
+        days_running=days_running,
+        sharpe_ratio=round(sharpe, 4),
+        max_drawdown_pct=round(max_drawdown, 4),
+        win_rate=round(win_rate, 4),
+        total_trades=total_trades,
+    )
+
+
+async def evaluate_promotion_gates(pool: object) -> None:
+    """Evaluate each registered strategy's promotion gate and log results.
+
+    Does NOT auto-promote — operator must confirm advancement via Telegram command.
+    Runs as a daily scheduler job.
+    """
+    from trading_bot.observability.logging import get_logger
+
+    log = get_logger(__name__)
+
+    for strategy_id, promotion in _registry.items():
+        metrics = await collect_strategy_metrics(strategy_id, pool)
+        if metrics is None:
+            log.info(
+                "promotion_gate_skipped",
+                strategy=strategy_id,
+                reason="insufficient_data",
+            )
+            continue
+
+        eligible, failures = promotion.can_advance(metrics)
+        log.info(
+            "promotion_gate_evaluated",
+            strategy=strategy_id,
+            current_tier=promotion.current_tier,
+            eligible=eligible,
+            failures=failures,
+            days_running=metrics.days_running,
+            sharpe=metrics.sharpe_ratio,
+            win_rate=metrics.win_rate,
+            total_trades=metrics.total_trades,
+        )

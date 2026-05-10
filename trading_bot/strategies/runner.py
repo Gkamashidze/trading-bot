@@ -16,8 +16,11 @@ from pathlib import Path
 import pandas as pd
 
 from trading_bot.config import get_settings
+from trading_bot.core.exceptions import DataStalenessError
+from trading_bot.data_quality.monitor import DataQualityMonitor
 from trading_bot.market_context import MarketContext, get_market_context
 from trading_bot.observability.logging import get_logger
+from trading_bot.promotion.pipeline import PromotionTier, register_strategy
 from trading_bot.strategies.base import StrategyResult
 from trading_bot.strategies.rsi_mean_reversion import RsiMeanReversionStrategy
 from trading_bot.strategies.sma_crossover import SmaCrossoverStrategy
@@ -28,6 +31,11 @@ _STRATEGIES = [
     SmaCrossoverStrategy(fast=20, slow=50),
     RsiMeanReversionStrategy(period=14, oversold=30.0, overbought=70.0),
 ]
+_freshness_monitor = DataQualityMonitor()
+
+# Register all strategies in the promotion pipeline on module load
+for _s in _STRATEGIES:
+    register_strategy(_s.strategy_id, tier=PromotionTier.PAPER)
 
 _last_results: list[StrategyResult] = []
 _last_computed_at: datetime | None = None
@@ -96,6 +104,22 @@ async def refresh_signals() -> list[StrategyResult]:
             log.warning("signal_refresh_skipped", symbol=symbol, reason="no bars available")
             continue
 
+        # Freshness gate — skip stale data rather than trade on bad inputs
+        last_bar_ts = bars.iloc[-1]["open_time"]
+        if not isinstance(last_bar_ts, pd.Timestamp):
+            last_bar_ts = pd.Timestamp(last_bar_ts)
+        try:
+            _freshness_monitor.check_freshness(
+                exchange=crypto.exchange,
+                symbol=symbol,
+                timeframe=crypto.timeframes[0],
+                last_bar_time=last_bar_ts,
+            )
+        except DataStalenessError as e:
+            log.error("signal_refresh_stale_data", symbol=symbol, error=str(e))
+            _send_stale_data_alert(symbol, str(e))
+            continue
+
         for strategy in _STRATEGIES:
             try:
                 result = strategy.compute(bars)
@@ -140,7 +164,7 @@ def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[St
     Rules (conservative — never flip signal direction, only dampen strength):
       Extreme Fear  + BUY  → cap strength at 0.5 (falling knife risk)
       Extreme Greed + SELL → cap strength at 0.5 (greed can persist)
-      Negative funding + BUY → boost strength by 10% (shorts paying = bullish tilt)
+      Negative funding + BUY → dampen strength by 10% (crowded shorts = uncertain direction)
       High rates (≥4%) + BUY → reduce strength by 20% (risk-off macro)
       High inflation (≥4%) + BUY → reduce strength by 10%
     """
@@ -160,7 +184,7 @@ def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[St
             if ctx.is_extreme_fear():
                 strength = min(strength, 0.5)
             if ctx.is_negative_funding():
-                strength = min(strength * 1.1, 1.0)
+                strength *= 0.9
             if ctx.is_high_rates():
                 strength *= 0.8
             if ctx.is_high_inflation():
@@ -174,3 +198,28 @@ def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[St
         )
 
     return adjusted
+
+
+def _send_stale_data_alert(symbol: str, detail: str) -> None:
+    """Fire a Telegram alert when data is stale (non-blocking, best-effort)."""
+    import asyncio
+
+    from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+    alerter = TelegramAlerter.from_env_optional()
+    if alerter is None:
+        return
+
+    async def _send() -> None:
+        await alerter.send(
+            AlertLevel.ERROR,
+            f"Stale data — signal skipped: {symbol}",
+            detail=detail[:400],
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(_send())  # noqa: RUF006
+    except Exception:  # noqa: S110
+        pass

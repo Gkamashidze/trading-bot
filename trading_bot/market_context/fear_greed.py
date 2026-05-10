@@ -1,6 +1,6 @@
 """Fear & Greed Index provider — Alternative.me public API.
 
-Updates once daily. Cached for 1 hour (well within the update cadence).
+Updates once daily. Cached for 23 hours to align with daily publish cadence.
 No API key required.
 """
 
@@ -15,7 +15,7 @@ from trading_bot.observability.logging import get_logger
 log = get_logger(__name__)
 
 _URL = "https://api.alternative.me/fng/?limit=1&format=json"
-_TTL = timedelta(hours=1)
+_TTL = timedelta(hours=23)  # published once per day; no need to refetch hourly
 
 
 class FearGreedProvider:
@@ -41,6 +41,15 @@ class FearGreedProvider:
                 self._expires_at = now + _TTL
                 log.info("fear_greed_fetched", value=self._value, label=self._label)
         except Exception as e:
-            log.warning("fear_greed_fetch_failed", error=str(e))
+            log.error("fear_greed_fetch_failed", error=str(e))
+            await _send_context_alert("Fear & Greed API failure", str(e))
 
         return self._value, self._label
+
+
+async def _send_context_alert(title: str, detail: str) -> None:
+    from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+    alerter = TelegramAlerter.from_env_optional()
+    if alerter:
+        await alerter.send(AlertLevel.ERROR, title, detail=detail[:300])
