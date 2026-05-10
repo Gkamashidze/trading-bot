@@ -92,7 +92,7 @@ Breaking changes: append `!` after scope: `feat(core)!: rename OHLCVBar fields`
 - [x] Stage 4: Backtesting Framework
 - [x] Stage 5: Execution Engine & Paper Trading
 - [x] Stage 6: Safety Layer & Production Controls
-- [ ] Stage 7: Deployment & Infrastructure
+- [x] Stage 7: Deployment & Infrastructure
 - [ ] Stage 8: Quant & AI Expansion
 
 ## When Adding New Code

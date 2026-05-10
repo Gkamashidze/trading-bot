@@ -85,9 +85,7 @@ def create_app() -> FastAPI:
         Does NOT check DB or scheduler state (that would cause restart loops
         during DB maintenance windows).
         """
-        return JSONResponse(
-            {"status": "alive", "uptime_seconds": int(time.time() - _start_time)}
-        )
+        return JSONResponse({"status": "alive", "uptime_seconds": int(time.time() - _start_time)})
 
     @app.get("/readyz", response_class=JSONResponse)
     async def readyz() -> JSONResponse:

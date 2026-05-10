@@ -72,7 +72,7 @@ class TelegramCommandHandler:
 
     async def _poll_once(self, client: httpx.AsyncClient) -> None:
         url = _TELEGRAM_API.format(token=self._token, method="getUpdates")
-        params = {"timeout": _POLL_TIMEOUT, "offset": self._offset, "allowed_updates": ["message"]}
+        params: dict[str, int] = {"timeout": _POLL_TIMEOUT, "offset": self._offset}
         resp = await client.get(url, params=params)
         if resp.status_code != 200:
             return
@@ -97,9 +97,7 @@ class TelegramCommandHandler:
                 command = text.split()[0].lstrip("/").lower()
                 await self._dispatch(client, chat_id, command)
 
-    async def _dispatch(
-        self, client: httpx.AsyncClient, chat_id: int, command: str
-    ) -> None:
+    async def _dispatch(self, client: httpx.AsyncClient, chat_id: int, command: str) -> None:
         handlers: dict[str, Any] = {
             "status": self._cmd_status,
             "portfolio": self._cmd_portfolio,
@@ -109,7 +107,9 @@ class TelegramCommandHandler:
         }
         handler = handlers.get(command)
         if handler is None:
-            await self._send(client, chat_id, f"უცნობი ბრძანება: /{command}\n/help — ბრძანებების სია")
+            await self._send(
+                client, chat_id, f"უცნობი ბრძანება: /{command}\n/help — ბრძანებების სია"
+            )
             return
         await handler(client, chat_id)
 
@@ -141,18 +141,12 @@ class TelegramCommandHandler:
         ]
         await self._send(client, chat_id, "\n".join(lines))
 
-    async def _cmd_circuit_breaker(
-        self, client: httpx.AsyncClient, chat_id: int
-    ) -> None:
+    async def _cmd_circuit_breaker(self, client: httpx.AsyncClient, chat_id: int) -> None:
         from trading_bot.safety.circuit_breaker import get_circuit_breaker
 
         cb = get_circuit_breaker()
         trading = "✅ დაშვებული" if cb.is_trading_allowed() else "🚫 დაბლოკილი"
-        last = (
-            cb.last_checked.strftime("%H:%M UTC")
-            if cb.last_checked
-            else "ჯერ არ შემოწმებულა"
-        )
+        last = cb.last_checked.strftime("%H:%M UTC") if cb.last_checked else "ჯერ არ შემოწმებულა"
         lines = [
             "🔐 *Circuit Breaker*",
             f"დონე: {cb.label}",
@@ -199,9 +193,7 @@ class TelegramCommandHandler:
         ]
         await self._send(client, chat_id, "\n".join(lines))
 
-    async def _send(
-        self, client: httpx.AsyncClient, chat_id: int, text: str
-    ) -> None:
+    async def _send(self, client: httpx.AsyncClient, chat_id: int, text: str) -> None:
         url = _TELEGRAM_API.format(token=self._token, method="sendMessage")
         try:
             await client.post(

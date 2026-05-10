@@ -22,7 +22,7 @@ log = get_logger(__name__)
 
 _DEFAULT_SNAPSHOT_DIR = Path("/data/snapshots")
 _FILENAME_PREFIX = "state_"
-_KEEP_LAST = 168  # 7 days × 24 h = 168 hourly snapshots
+_KEEP_LAST = 168  # 7 days x 24 h = 168 hourly snapshots
 
 
 @dataclass
@@ -33,7 +33,7 @@ class StateSnapshot:
     daily_pnl: float
     daily_drawdown_pct: float
     position_count: int
-    positions: list[dict]  # [{symbol, qty, avg_cost, current_price}]
+    positions: list[dict[str, object]]  # [{symbol, qty, avg_cost, current_price}]
     cb_tier: int
     cb_peak_tier: int
     cb_tripped_at: str | None
@@ -80,7 +80,7 @@ def save_snapshot(
 ) -> Path:
     """Serialize snapshot to JSON. Returns the written file path."""
     directory.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     path = directory / f"{_FILENAME_PREFIX}{ts}.json"
     path.write_text(json.dumps(asdict(snapshot), indent=2))
     log.info(

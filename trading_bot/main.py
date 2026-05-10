@@ -139,6 +139,21 @@ async def _startup() -> tuple[
     del _bt_task  # fire-and-forget: task runs independently
     log.info("signal_refresh_scheduled")
 
+    # ── Telegram Operator Command Handler (Stage 7) ───────────────────────
+    if pool is not None:
+        from trading_bot.operator_console.telegram_commands import TelegramCommandHandler
+
+        cmd_handler = TelegramCommandHandler.from_env_optional(pool=pool)
+        if cmd_handler is not None:
+            _cmd_task = asyncio.create_task(cmd_handler.run(), name="telegram_commands")
+            del _cmd_task  # fire-and-forget: exits on shutdown via is_shutdown_requested()
+            log.info("telegram_command_handler_started")
+        else:
+            log.info(
+                "telegram_command_handler_skipped",
+                reason="TELEGRAM_BOT_TOKEN or TELEGRAM_ALERT_CHAT_ID not set",
+            )
+
     # ── WebSocket price feed ──────────────────────────────────────────────
     price_cache = get_price_cache()
     ws_symbols = [s.replace("/", "") for s in settings.trading.crypto.symbols]
