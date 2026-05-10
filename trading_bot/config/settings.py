@@ -144,6 +144,14 @@ class TelegramSettings(BaseSettings):
     alert_chat_id: str = Field(default="", alias="TELEGRAM_ALERT_CHAT_ID")
 
 
+class DataStorageSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    # Root directory for Parquet files. On Railway, mount a Volume at /data
+    # and set DATA_PATH=/data/raw. Falls back to a local path for development.
+    raw_path: str = Field(default="data/raw", alias="DATA_PATH")
+
+
 # ---------------------------------------------------------------------------
 # Root settings
 # ---------------------------------------------------------------------------
@@ -177,6 +185,7 @@ class Settings(BaseSettings):
     latency_budgets: LatencyBudgetsSettings = Field(default_factory=LatencyBudgetsSettings)
     binance: BinanceExchangeSettings = Field(default_factory=BinanceExchangeSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    storage: DataStorageSettings = Field(default_factory=DataStorageSettings)
 
     @field_validator("environment", mode="before")
     @classmethod

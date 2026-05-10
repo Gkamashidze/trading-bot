@@ -26,6 +26,7 @@ from typing import Any, cast
 
 import pandas as pd
 
+from trading_bot.config import get_settings
 from trading_bot.core.exceptions import DataFetchError
 from trading_bot.core.models import DataLineage, ExchangeId
 from trading_bot.observability.logging import get_logger
@@ -33,8 +34,12 @@ from trading_bot.observability.tracing import start_span
 
 log = get_logger(__name__)
 
-_RAW_BASE = Path("trading_bot/data/raw")
 _SCHEMA_VERSION = "1.0"
+
+
+def _default_raw_base() -> Path:
+    """Return configured data path (DATA_PATH env var) or development fallback."""
+    return Path(get_settings().storage.raw_path)
 
 
 class OHLCVDownloader:
@@ -47,11 +52,11 @@ class OHLCVDownloader:
     def __init__(
         self,
         exchange: Any,
-        base_path: Path = _RAW_BASE,
+        base_path: Path | None = None,
         batch_size: int = 1000,
     ) -> None:
         self._exchange = exchange
-        self._base_path = base_path
+        self._base_path = base_path if base_path is not None else _default_raw_base()
         self._batch_size = batch_size
 
     def _partition_path(

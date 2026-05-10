@@ -8,11 +8,15 @@ Routes:
     GET /partials/audit           - htmx partial: recent audit log entries
     GET /health                   - JSON health check (Railway healthcheck)
     POST /flags/{name}/toggle     - Toggle a feature flag on/off
+    POST /admin/backfill          - Trigger historical OHLCV download (background task)
+    GET  /admin/backfill/status   - JSON status of running backfill
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +35,18 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 _pool: Any = None
 _scheduler: Any = None
 _start_time = time.time()
+
+# Backfill state — tracks running/completed download jobs
+_backfill_task: asyncio.Task[None] | None = None
+_backfill_status: dict[str, Any] = {
+    "running": False,
+    "symbol": None,
+    "timeframe": None,
+    "started_at": None,
+    "finished_at": None,
+    "bars_stored": None,
+    "error": None,
+}
 
 
 def init_dashboard(pool: Any, scheduler: Any) -> None:
@@ -162,5 +178,75 @@ def create_app() -> FastAPI:
             name="partials/flags.html",
             context={"flags": flags, "pool_missing": False},
         )
+
+    @app.post("/admin/backfill", response_class=JSONResponse)
+    async def trigger_backfill(request: Request) -> JSONResponse:
+        """Start a historical OHLCV backfill as a background task.
+
+        Query params: symbol (default BTC/USDT), timeframe (default 1d),
+        days_back (default 730 = 2 years).
+        """
+        global _backfill_status
+
+        if _backfill_status["running"]:
+            return JSONResponse(
+                {"error": "backfill already running", **_backfill_status}, status_code=409
+            )
+
+        params = dict(request.query_params)
+        symbol = params.get("symbol", "BTC/USDT")
+        timeframe = params.get("timeframe", "1d")
+        days_back = int(params.get("days_back", 730))
+
+        async def _run_backfill() -> None:
+            global _backfill_status
+            import datetime as dt
+
+            from trading_bot.core.models import ExchangeId
+            from trading_bot.data.ingestion import OHLCVDownloader
+            from trading_bot.exchange import get_exchange
+
+            _backfill_status = {
+                "running": True,
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "started_at": datetime.now(UTC).isoformat(),
+                "finished_at": None,
+                "bars_stored": None,
+                "error": None,
+            }
+            try:
+                end = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+                start = end - dt.timedelta(days=days_back)
+                exchange = get_exchange(ExchangeId.BINANCE)
+                downloader = OHLCVDownloader(exchange=exchange)
+                bars = await downloader.download(
+                    exchange_id=ExchangeId.BINANCE,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    start=start,
+                    end=end,
+                )
+                await exchange.close()  # type: ignore[attr-defined]
+                _backfill_status["running"] = False
+                _backfill_status["finished_at"] = datetime.now(UTC).isoformat()
+                _backfill_status["bars_stored"] = bars
+                log.info("backfill_complete", symbol=symbol, timeframe=timeframe, bars=bars)
+            except Exception as e:
+                _backfill_status["running"] = False
+                _backfill_status["finished_at"] = datetime.now(UTC).isoformat()
+                _backfill_status["error"] = str(e)
+                log.error("backfill_failed", symbol=symbol, timeframe=timeframe, error=str(e))
+
+        global _backfill_task
+        _backfill_task = asyncio.create_task(_run_backfill())
+        log.info("backfill_triggered", symbol=symbol, timeframe=timeframe, days_back=days_back)
+        return JSONResponse(
+            {"status": "started", "symbol": symbol, "timeframe": timeframe, "days_back": days_back}
+        )
+
+    @app.get("/admin/backfill/status", response_class=JSONResponse)
+    async def backfill_status_endpoint() -> JSONResponse:
+        return JSONResponse(_backfill_status)
 
     return app
