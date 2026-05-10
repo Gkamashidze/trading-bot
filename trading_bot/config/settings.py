@@ -152,6 +152,14 @@ class DataStorageSettings(BaseSettings):
     raw_path: str = Field(default="data/raw", alias="DATA_PATH")
 
 
+class MarketContextSettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    enabled: bool = True
+    refresh_interval_minutes: int = 60
+    fred_api_key: str = Field(default="", alias="FRED_API_KEY")
+
+
 class TradingCryptoSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -209,6 +217,7 @@ class Settings(BaseSettings):
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     storage: DataStorageSettings = Field(default_factory=DataStorageSettings)
     trading: TradingSettings = Field(default_factory=TradingSettings)
+    market_context: MarketContextSettings = Field(default_factory=MarketContextSettings)
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -268,7 +277,16 @@ def _load_settings() -> Settings:
     # For YAML-sourced defaults we instantiate nested models directly.
     nested_overrides: dict[str, Any] = {}
 
-    for key in ("logging", "database", "otel", "prometheus", "risk", "time_sync", "trading"):
+    for key in (
+        "logging",
+        "database",
+        "otel",
+        "prometheus",
+        "risk",
+        "time_sync",
+        "trading",
+        "market_context",
+    ):
         if key in yaml_defaults:
             nested_overrides[key] = yaml_defaults[key]
 

@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from trading_bot.config import get_settings
+from trading_bot.market_context import MarketContext, get_market_context
 from trading_bot.observability.logging import get_logger
 from trading_bot.strategies.base import StrategyResult
 from trading_bot.strategies.rsi_mean_reversion import RsiMeanReversionStrategy
@@ -108,6 +109,10 @@ async def refresh_signals() -> list[StrategyResult]:
         except Exception as e:
             log.error("strategy_compute_error", strategy=strategy.strategy_id, error=str(e))
 
+    ctx = get_market_context()
+    if ctx is not None:
+        results = _apply_context(results, ctx)
+
     _last_results = results
     _last_computed_at = datetime.now(UTC)
 
@@ -120,3 +125,45 @@ async def refresh_signals() -> list[StrategyResult]:
         log.error("paper_routing_error", error=str(e))
 
     return results
+
+
+def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[StrategyResult]:
+    """Adjust signal strength based on market-wide context.
+
+    Rules (conservative — never flip signal direction, only dampen strength):
+      Extreme Fear  + BUY  → cap strength at 0.5 (falling knife risk)
+      Extreme Greed + SELL → cap strength at 0.5 (greed can persist)
+      Negative funding + BUY → boost strength by 10% (shorts paying = bullish tilt)
+      High rates (≥4%) + BUY → reduce strength by 20% (risk-off macro)
+      High inflation (≥4%) + BUY → reduce strength by 10%
+    """
+    adjusted: list[StrategyResult] = []
+    for r in results:
+        strength = r.strength
+        indicators = dict(r.indicators)
+
+        if ctx.fear_greed_value is not None:
+            indicators["fear_greed"] = float(ctx.fear_greed_value)
+        if ctx.funding_rate is not None:
+            indicators["funding_rate"] = ctx.funding_rate
+        if ctx.fed_funds_rate is not None:
+            indicators["fed_funds_rate"] = ctx.fed_funds_rate
+
+        if r.signal == "BUY":
+            if ctx.is_extreme_fear():
+                strength = min(strength, 0.5)
+            if ctx.is_negative_funding():
+                strength = min(strength * 1.1, 1.0)
+            if ctx.is_high_rates():
+                strength *= 0.8
+            if ctx.is_high_inflation():
+                strength *= 0.9
+        elif r.signal == "SELL":
+            if ctx.is_extreme_greed():
+                strength = min(strength, 0.5)
+
+        adjusted.append(
+            r.model_copy(update={"strength": round(strength, 4), "indicators": indicators})
+        )
+
+    return adjusted

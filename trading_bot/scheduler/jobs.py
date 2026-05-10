@@ -140,6 +140,24 @@ async def daily_ohlcv_ingestion_job(
     )
 
 
+async def market_context_refresh_job() -> None:
+    """Fetch Fear & Greed, Funding Rate, and FRED macro data.
+
+    Runs every hour. Each provider has its own TTL cache, so the actual
+    HTTP request only fires when the cache has expired.
+    """
+    from trading_bot.market_context import refresh_market_context
+
+    ctx = await refresh_market_context()
+    log.info(
+        "market_context_job_complete",
+        fear_greed=ctx.fear_greed_value,
+        funding_rate=ctx.funding_rate,
+        fed_rate=ctx.fed_funds_rate,
+        cpi_yoy=ctx.cpi_yoy,
+    )
+
+
 async def circuit_breaker_monitor_job() -> None:
     """Check drawdown vs circuit breaker thresholds. Runs every 5 minutes."""
     from trading_bot.safety.circuit_breaker import get_circuit_breaker
@@ -213,6 +231,17 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         name="Backtest refresh (6h)",
         replace_existing=True,
     )
+
+    settings = get_settings()
+    if settings.market_context.enabled:
+        scheduler.add_job(
+            market_context_refresh_job,
+            trigger="interval",
+            minutes=settings.market_context.refresh_interval_minutes,
+            id="market_context_refresh",
+            name="Market context refresh (Fear&Greed, Funding Rate, Macro)",
+            replace_existing=True,
+        )
 
     scheduler.add_job(
         circuit_breaker_monitor_job,
