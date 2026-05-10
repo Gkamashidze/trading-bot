@@ -95,7 +95,17 @@
       <div class="text-gray-500 text-sm animate-pulse">Backtesting შედეგები იტვირთება...</div>
     </section>
 
-    <!-- Row 5: Audit Log -->
+    <!-- Row 5: Paper Portfolio -->
+    <section
+      id="paper-portfolio-section"
+      hx-get="/partials/paper_portfolio"
+      hx-trigger="load, every 60s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">ქაღალდური პორტფელი იტვირთება...</div>
+    </section>
+
+    <!-- Row 6: Audit Log -->
     <section
       id="audit-section"
       hx-get="/partials/audit"

@@ -107,4 +107,13 @@ async def refresh_signals() -> list[StrategyResult]:
 
     _last_results = results
     _last_computed_at = datetime.now(UTC)
+
+    # Route signals to paper exchange (lazy import avoids circular dependency)
+    try:
+        from trading_bot.execution.router import route_signals
+
+        await route_signals(results)
+    except Exception as e:
+        log.error("paper_routing_error", error=str(e))
+
     return results

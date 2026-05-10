@@ -10,6 +10,7 @@ Routes:
     POST /flags/{name}/toggle     - Toggle a feature flag on/off
     POST /admin/backfill          - Trigger historical OHLCV download (background task)
     GET  /admin/backfill/status   - JSON status of running backfill
+    GET  /partials/paper_portfolio - htmx partial: paper trading portfolio card
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from fastapi.templating import Jinja2Templates
 
 from trading_bot.backtesting.runner import get_last_backtest_at, get_latest_backtest
 from trading_bot.observability.logging import get_logger
+from trading_bot.oms.tracker import get_order_tracker
+from trading_bot.portfolio.manager import get_portfolio_manager
 from trading_bot.strategies.runner import get_last_computed_at, get_latest_signals
 from trading_bot.websocket.price_cache import get_price_cache
 
@@ -281,6 +284,18 @@ def create_app() -> FastAPI:
             request=request,
             name="partials/backtest.html",
             context={"results": results, "computed_at": computed_at},
+        )
+
+    @app.get("/partials/paper_portfolio", response_class=HTMLResponse)
+    async def partial_paper_portfolio(request: Request) -> HTMLResponse:
+        portfolio = get_portfolio_manager()
+        tracker = get_order_tracker()
+        snapshot = portfolio.get_snapshot()
+        recent_orders = tracker.recent(10)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/paper_portfolio.html",
+            context={"snapshot": snapshot, "recent_orders": recent_orders},
         )
 
     return app
