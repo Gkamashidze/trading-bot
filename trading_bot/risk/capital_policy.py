@@ -131,6 +131,7 @@ class CapitalPolicyEngine:
         snapshot: PortfolioSnapshot,
         asset_class: AssetClass,
         weekly_pnl_pct: float = 0.0,
+        fill_price: Decimal | None = None,
     ) -> CapitalPolicyDecision:
         """Evaluate the order against all capital policies.
 
@@ -139,6 +140,8 @@ class CapitalPolicyEngine:
             snapshot: Current portfolio state.
             asset_class: Asset class of the order's symbol.
             weekly_pnl_pct: Current week's PnL as a fraction of equity (negative = loss).
+            fill_price: Actual fill/reference price to use for capital calculations.
+                        Required for accurate exposure checks. If None, order is rejected.
         """
         if order.side != OrderSide.BUY:
             return CapitalPolicyDecision(True, "sell orders are not capital-limited")
@@ -166,6 +169,13 @@ class CapitalPolicyEngine:
                 f">= limit {config.weekly_loss_budget_pct:.2%}",
             )
 
+        # ── Require explicit fill price ──────────────────────────────────────
+        if fill_price is None or fill_price <= Decimal("0"):
+            return CapitalPolicyDecision(
+                False,
+                "fill_price is missing or invalid — cannot calculate capital exposure",
+            )
+
         strategy_id = order.strategy_id or "__default__"
         policy = config.strategy_policy(strategy_id)
 
@@ -184,7 +194,6 @@ class CapitalPolicyEngine:
         strategy_positions_value = sum(
             p.market_value for p in snapshot.positions if p.strategy_id == strategy_id
         )
-        fill_price = self._estimate_fill_price(order, snapshot)
         new_order_value = order.quantity * fill_price
         strategy_exposure = float((strategy_positions_value + new_order_value) / equity)
 
@@ -257,24 +266,6 @@ class CapitalPolicyEngine:
 
     def get_strategy_state(self, strategy_id: str) -> StrategyAllocationState:
         return self._strategy_states.get(strategy_id, StrategyAllocationState.ACTIVE)
-
-    @staticmethod
-    def _estimate_fill_price(order: OrderRequest, snapshot: PortfolioSnapshot) -> Decimal:
-        """Best-effort fill price for capital calculation.
-
-        Uses limit_price if set, otherwise falls back to current market price
-        from positions (for the same symbol) or a safe default.
-        """
-        if order.limit_price is not None:
-            return order.limit_price
-
-        # Look for an existing position in this symbol to get a current price
-        for pos in snapshot.positions:
-            if pos.symbol == order.symbol:
-                return pos.current_price
-
-        # No existing position — use cash balance as a proxy floor
-        return snapshot.cash_balance / max(snapshot.total_equity, Decimal("1"))
 
 
 # ---------------------------------------------------------------------------
