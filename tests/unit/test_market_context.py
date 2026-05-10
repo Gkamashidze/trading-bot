@@ -10,24 +10,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from trading_bot.market_context import MarketContext, refresh_market_context
+from trading_bot.market_context import MarketContext
 from trading_bot.market_context.fear_greed import FearGreedProvider
 from trading_bot.market_context.funding_rate import FundingRateProvider
 from trading_bot.market_context.macro import MacroProvider
-
 
 # ── MarketContext dataclass ───────────────────────────────────────────────────
 
 
 def _ctx(**kwargs) -> MarketContext:
-    defaults = dict(
-        fear_greed_value=None,
-        fear_greed_label=None,
-        funding_rate=None,
-        fed_funds_rate=None,
-        cpi_yoy=None,
-        fetched_at=datetime.now(UTC),
-    )
+    defaults = {
+        "fear_greed_value": None,
+        "fear_greed_label": None,
+        "funding_rate": None,
+        "fed_funds_rate": None,
+        "cpi_yoy": None,
+        "fetched_at": datetime.now(UTC),
+    }
     return MarketContext(**{**defaults, **kwargs})
 
 
@@ -89,7 +88,9 @@ class TestFearGreedProvider:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch("trading_bot.market_context.fear_greed.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "trading_bot.market_context.fear_greed.httpx.AsyncClient", return_value=mock_client
+        ):
             value, label = await provider.fetch()
 
         assert value == 23
@@ -103,7 +104,9 @@ class TestFearGreedProvider:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("trading_bot.market_context.fear_greed.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "trading_bot.market_context.fear_greed.httpx.AsyncClient", return_value=mock_client
+        ):
             value, label = await provider.fetch()
 
         assert value is None
@@ -123,7 +126,9 @@ class TestFearGreedProvider:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch("trading_bot.market_context.fear_greed.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "trading_bot.market_context.fear_greed.httpx.AsyncClient", return_value=mock_client
+        ):
             await provider.fetch()
             await provider.fetch()
 
@@ -146,7 +151,9 @@ class TestFundingRateProvider:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch("trading_bot.market_context.funding_rate.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "trading_bot.market_context.funding_rate.httpx.AsyncClient", return_value=mock_client
+        ):
             rate = await provider.fetch()
 
         assert rate == pytest.approx(0.0001)
@@ -163,7 +170,9 @@ class TestFundingRateProvider:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch("trading_bot.market_context.funding_rate.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "trading_bot.market_context.funding_rate.httpx.AsyncClient", return_value=mock_client
+        ):
             rate = await provider.fetch()
 
         assert rate == pytest.approx(-0.0005)
@@ -176,7 +185,9 @@ class TestFundingRateProvider:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.get = AsyncMock(side_effect=Exception("timeout"))
 
-        with patch("trading_bot.market_context.funding_rate.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "trading_bot.market_context.funding_rate.httpx.AsyncClient", return_value=mock_client
+        ):
             rate = await provider.fetch()
 
         assert rate is None
