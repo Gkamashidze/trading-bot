@@ -145,6 +145,26 @@ DATA_ANOMALIES_DETECTED = Counter(
     labelnames=["exchange", "symbol", "anomaly_type"],
 )
 
+FILL_COUNT = Counter(
+    "trading_fills_total",
+    "Total confirmed fills",
+    labelnames=["symbol", "side", "environment", "partial"],
+)
+
+FILL_NOTIONAL = Histogram(
+    "trading_fill_notional_usd",
+    "Fill notional value in USD",
+    labelnames=["symbol", "environment"],
+    buckets=[10, 50, 100, 500, 1000, 5000, 10000, 50000],
+)
+
+FILL_SLIPPAGE_BPS = Histogram(
+    "trading_fill_slippage_bps",
+    "Fill slippage in basis points",
+    labelnames=["symbol"],
+    buckets=[0.1, 0.5, 1, 2, 5, 10, 25, 50, 100],
+)
+
 # ── Prometheus server ─────────────────────────────────────────────────────────
 
 _metrics_started = False
