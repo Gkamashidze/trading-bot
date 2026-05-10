@@ -115,9 +115,7 @@ class StrategyPromotion:
                 f"drawdown {metrics.max_drawdown_pct:.1%} > {gate.max_drawdown_pct:.1%} limit"
             )
         if metrics.win_rate < gate.min_win_rate:
-            failures.append(
-                f"win_rate {metrics.win_rate:.1%} < {gate.min_win_rate:.1%} required"
-            )
+            failures.append(f"win_rate {metrics.win_rate:.1%} < {gate.min_win_rate:.1%} required")
         if metrics.total_trades < gate.min_trades:
             failures.append(f"trades {metrics.total_trades} < {gate.min_trades} required")
 
