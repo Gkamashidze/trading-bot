@@ -18,6 +18,9 @@ FROM python:3.12-slim AS runtime
 # Non-root user (security: containers should not run as root)
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
+# Pre-create the data directory so Railway Volume mounts with correct ownership
+RUN mkdir -p /data/raw && chown -R appuser:appgroup /data
+
 WORKDIR /app
 
 # Copy installed packages from builder
