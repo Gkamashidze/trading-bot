@@ -85,7 +85,17 @@
       <div class="text-gray-500 text-sm animate-pulse">სიგნალები იტვირთება...</div>
     </section>
 
-    <!-- Row 4: Backtesting Results -->
+    <!-- Row 4: Market Context (Fear & Greed, Funding Rate, Macro) -->
+    <section
+      id="market-context-section"
+      hx-get="/partials/market_context"
+      hx-trigger="load, every 300s"
+      hx-swap="innerHTML"
+    >
+      <div class="text-gray-500 text-sm animate-pulse">მაკეტ კონტექსტი იტვირთება...</div>
+    </section>
+
+    <!-- Row 5: Backtesting Results -->
     <section
       id="backtest-section"
       hx-get="/partials/backtest"

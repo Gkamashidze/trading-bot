@@ -56,7 +56,7 @@ class MarketContext:
     @property
     def regime(self) -> str:
         """Current market regime: 'risk_on', 'risk_off', or 'neutral'."""
-        from trading_bot.market_context.regime import MarketRegime, classify_regime
+        from trading_bot.market_context.regime import classify_regime
 
         return str(classify_regime(self))
 

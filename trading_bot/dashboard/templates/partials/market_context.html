@@ -1,0 +1,90 @@
+<div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">მაკეტ კონტექსტი</h2>
+
+  {% if ctx is none %}
+    <div class="text-gray-500 text-xs">მონაცემები ჯერ არ ჩამოიტვირთა (მოლოდინი scheduler-ის პირველ გაშვებამდე)</div>
+  {% else %}
+
+  <!-- Regime badge -->
+  <div class="flex items-center justify-between mb-4 pb-3 border-b border-gray-800">
+    <span class="text-sm text-gray-400">რეჟიმი</span>
+    {% if ctx.regime == "risk_on" %}
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-green-900 text-green-300">Risk-On 🟢</span>
+    {% elif ctx.regime == "risk_off" %}
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-red-900 text-red-300">Risk-Off 🔴</span>
+    {% else %}
+      <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-gray-700 text-gray-300">ნეიტრალური ⚪</span>
+    {% endif %}
+  </div>
+
+  <!-- Fear & Greed -->
+  <div class="mb-3">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-xs text-gray-500">Fear & Greed</span>
+      {% if ctx.fear_greed_value is not none %}
+        <span class="text-xs font-mono
+          {% if ctx.fear_greed_value <= 25 %}text-red-400
+          {% elif ctx.fear_greed_value <= 45 %}text-orange-400
+          {% elif ctx.fear_greed_value <= 55 %}text-gray-300
+          {% elif ctx.fear_greed_value <= 75 %}text-green-400
+          {% else %}text-emerald-400{% endif %}">
+          {{ ctx.fear_greed_value }} — {{ ctx.fear_greed_label or "—" }}
+        </span>
+      {% else %}
+        <span class="text-xs text-gray-600">—</span>
+      {% endif %}
+    </div>
+    {% if ctx.fear_greed_value is not none %}
+    <div class="w-full bg-gray-800 rounded-full h-1.5">
+      <div class="h-1.5 rounded-full
+        {% if ctx.fear_greed_value <= 25 %}bg-red-500
+        {% elif ctx.fear_greed_value <= 45 %}bg-orange-500
+        {% elif ctx.fear_greed_value <= 55 %}bg-gray-400
+        {% elif ctx.fear_greed_value <= 75 %}bg-green-500
+        {% else %}bg-emerald-500{% endif %}"
+        style="width: {{ ctx.fear_greed_value }}%">
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Funding Rate + Macro -->
+  <div class="space-y-1.5 text-xs">
+    <div class="flex justify-between">
+      <span class="text-gray-500">BTC Funding Rate</span>
+      {% if ctx.funding_rate is not none %}
+        <span class="font-mono {% if ctx.funding_rate < 0 %}text-green-400{% elif ctx.funding_rate > 0.001 %}text-red-400{% else %}text-gray-300{% endif %}">
+          {{ "%.4f"|format(ctx.funding_rate * 100) }}%
+        </span>
+      {% else %}
+        <span class="text-gray-600">—</span>
+      {% endif %}
+    </div>
+    <div class="flex justify-between">
+      <span class="text-gray-500">Fed Funds Rate</span>
+      {% if ctx.fed_funds_rate is not none %}
+        <span class="font-mono {% if ctx.fed_funds_rate >= 4.0 %}text-red-400{% else %}text-gray-300{% endif %}">
+          {{ "%.2f"|format(ctx.fed_funds_rate) }}%
+        </span>
+      {% else %}
+        <span class="text-gray-600">—</span>
+      {% endif %}
+    </div>
+    <div class="flex justify-between">
+      <span class="text-gray-500">CPI YoY</span>
+      {% if ctx.cpi_yoy is not none %}
+        <span class="font-mono {% if ctx.cpi_yoy >= 4.0 %}text-red-400{% else %}text-gray-300{% endif %}">
+          {{ "%.1f"|format(ctx.cpi_yoy) }}%
+        </span>
+      {% else %}
+        <span class="text-gray-600">—</span>
+      {% endif %}
+    </div>
+    <div class="flex justify-between pt-1 border-t border-gray-800">
+      <span class="text-gray-600">განახლდა</span>
+      <span class="text-gray-600">{{ ctx.fetched_at.strftime("%H:%M UTC") }}</span>
+    </div>
+  </div>
+
+  {% endif %}
+</div>

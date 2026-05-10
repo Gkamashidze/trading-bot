@@ -10,8 +10,9 @@ Routes:
     POST /flags/{name}/toggle     - Toggle a feature flag on/off
     POST /admin/backfill          - Trigger historical OHLCV download (background task)
     GET  /admin/backfill/status   - JSON status of running backfill
-    GET  /partials/paper_portfolio - htmx partial: paper trading portfolio card
-    GET  /partials/safety         - htmx partial: safety layer (kill switch + circuit breaker)
+    GET  /partials/paper_portfolio  - htmx partial: paper trading portfolio card
+    GET  /partials/safety          - htmx partial: safety layer (kill switch + circuit breaker)
+    GET  /partials/market_context  - htmx partial: market context (Fear&Greed, Funding, Macro)
 """
 
 from __future__ import annotations
@@ -351,6 +352,17 @@ def create_app() -> FastAPI:
                 "t2_pct": risk.tier2_daily_drawdown_pct,
                 "t3_pct": risk.tier3_daily_drawdown_pct,
             },
+        )
+
+    @app.get("/partials/market_context", response_class=HTMLResponse)
+    async def partial_market_context(request: Request) -> HTMLResponse:
+        from trading_bot.market_context import get_market_context
+
+        ctx = get_market_context()
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/market_context.html",
+            context={"ctx": ctx},
         )
 
     return app
