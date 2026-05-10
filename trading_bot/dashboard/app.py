@@ -218,45 +218,55 @@ def create_app() -> FastAPI:
 
     @app.get("/partials/backfill", response_class=HTMLResponse)
     async def partial_backfill_status(request: Request) -> HTMLResponse:
-        """Show data availability summary + backfill trigger button."""
+        """Show per-symbol data availability summary + backfill trigger buttons."""
         from pathlib import Path
+
+        import pandas as pd
 
         from trading_bot.config import get_settings
 
         settings = get_settings()
         raw_path = Path(settings.storage.raw_path)
-        primary_symbol = settings.trading.crypto.symbols[0].replace("/", "_")
-        parquet_dir = raw_path / "binance" / primary_symbol / "1d"
 
-        bar_count = 0
-        date_from: str | None = None
-        date_to: str | None = None
+        symbols_stats = []
+        for symbol in settings.trading.crypto.symbols:
+            symbol_safe = symbol.replace("/", "_")
+            parquet_dir = raw_path / "binance" / symbol_safe / "1d"
 
-        if parquet_dir.exists():
-            import pandas as pd
+            bar_count = 0
+            date_from: str | None = None
+            date_to: str | None = None
 
-            files = sorted(parquet_dir.glob("*.parquet"))
-            if files:
-                frames = []
-                for f in files:
-                    try:
-                        frames.append(pd.read_parquet(f, columns=["open_time"]))
-                    except Exception as e:
-                        log.warning("backfill_parquet_read_error", file=str(f), error=str(e))
-                if frames:
-                    combined = pd.concat(frames).drop_duplicates()
-                    bar_count = len(combined)
-                    ts = combined["open_time"].sort_values()
-                    date_from = str(ts.iloc[0])[:10]
-                    date_to = str(ts.iloc[-1])[:10]
+            if parquet_dir.exists():
+                files = sorted(parquet_dir.glob("*.parquet"))
+                if files:
+                    frames = []
+                    for f in files:
+                        try:
+                            frames.append(pd.read_parquet(f, columns=["open_time"]))
+                        except Exception as e:
+                            log.warning("backfill_parquet_read_error", file=str(f), error=str(e))
+                    if frames:
+                        combined = pd.concat(frames).drop_duplicates()
+                        bar_count = len(combined)
+                        ts = combined["open_time"].sort_values()
+                        date_from = str(ts.iloc[0])[:10]
+                        date_to = str(ts.iloc[-1])[:10]
+
+            symbols_stats.append(
+                {
+                    "symbol": symbol,
+                    "bar_count": bar_count,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                }
+            )
 
         return templates.TemplateResponse(
             request=request,
             name="partials/backfill.html",
             context={
-                "bar_count": bar_count,
-                "date_from": date_from,
-                "date_to": date_to,
+                "symbols_stats": symbols_stats,
                 "backfill": _backfill_status,
             },
         )
