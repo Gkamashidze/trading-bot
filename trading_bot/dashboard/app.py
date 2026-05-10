@@ -42,8 +42,23 @@ log = get_logger(__name__)
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
-_ALLOWED_SYMBOLS = {"BTC/USDT", "ETH/USDT"}
 _ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
+
+
+def _allowed_symbols() -> set[str]:
+    """Return the set of symbols eligible for backfill/price queries.
+
+    Derived from the asset universe registry (research status or above) so
+    the dashboard automatically reflects new phases without code changes.
+    Falls back to the Phase-1 defaults if the registry cannot be loaded.
+    """
+    try:
+        from trading_bot.asset_universe import get_asset_registry
+
+        return get_asset_registry().all_symbols(tradeable_only=False)
+    except Exception:
+        return {"BTC/USDT", "ETH/USDT"}
+
 
 # Set by init_dashboard() after DB + scheduler are ready
 _pool: Any = None
@@ -337,9 +352,10 @@ def create_app() -> FastAPI:
         except (ValueError, TypeError):
             days_back = 730
 
-        if symbol not in _ALLOWED_SYMBOLS:
+        allowed = _allowed_symbols()
+        if symbol not in allowed:
             return JSONResponse(
-                {"error": f"symbol must be one of {sorted(_ALLOWED_SYMBOLS)}"}, status_code=400
+                {"error": f"symbol must be one of {sorted(allowed)}"}, status_code=400
             )
         if timeframe not in _ALLOWED_TIMEFRAMES:
             return JSONResponse(
@@ -484,6 +500,52 @@ def create_app() -> FastAPI:
             context={"ctx": ctx},
         )
 
+    @app.get("/partials/equity_chart", response_class=HTMLResponse)
+    async def partial_equity_chart(request: Request) -> HTMLResponse:
+        import json as _json
+
+        from trading_bot.evidence import get_current_session_id, get_evidence_store
+
+        empty_ctx = {"labels_json": "[]", "values_json": "[]", "initial_equity": None}
+        try:
+            ev_store = get_evidence_store()
+            session_id = get_current_session_id()
+        except RuntimeError:
+            return templates.TemplateResponse(
+                request=request, name="partials/equity_chart.html", context=empty_ctx
+            )
+
+        if session_id is None:
+            return templates.TemplateResponse(
+                request=request, name="partials/equity_chart.html", context=empty_ctx
+            )
+
+        daily = await ev_store.list_daily_summaries(session_id, limit=90)
+
+        if daily:
+            daily_sorted = list(reversed(daily))
+            labels = [str(r["summary_date"]) for r in daily_sorted]
+            values = [float(r["ending_equity"]) for r in daily_sorted]
+            initial: float | None = (
+                float(daily_sorted[0]["starting_equity"]) if daily_sorted else None
+            )
+        else:
+            snaps = await ev_store.list_portfolio_snapshots(session_id, limit=100)
+            snaps_sorted = list(reversed(snaps))
+            labels = [str(r["captured_at"])[:16].replace("T", " ") for r in snaps_sorted]
+            values = [float(r["total_equity"]) for r in snaps_sorted]
+            initial = float(values[0]) if values else None
+
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/equity_chart.html",
+            context={
+                "labels_json": _json.dumps(labels),
+                "values_json": _json.dumps(values),
+                "initial_equity": initial,
+            },
+        )
+
     # ── Evidence store endpoints (read-only, no auth required except exports) ─
 
     @app.get("/evidence/session", response_class=JSONResponse)
@@ -579,6 +641,49 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
         data = await ev_store.export_session_json(session_id)
         return JSONResponse(data)
+
+    @app.get("/partials/asset_universe", response_class=HTMLResponse)
+    async def partial_asset_universe(request: Request) -> HTMLResponse:
+        from trading_bot.asset_universe import get_asset_registry
+
+        try:
+            registry = get_asset_registry()
+            assets = registry.assets
+        except Exception as exc:
+            log.warning("asset_universe_load_failed", error=str(exc))
+            assets = []
+
+        # Group for template
+        by_status: dict[str, list[dict]] = {
+            "paper": [],
+            "research": [],
+            "disabled": [],
+            "micro_live_candidate": [],
+            "live_candidate": [],
+        }
+        for spec in assets:
+            entry = {
+                "symbol": spec.symbol,
+                "venue": spec.venue,
+                "asset_class": spec.asset_class,
+                "phase": spec.phase,
+                "max_capital_pct": spec.max_capital_pct,
+                "max_order_notional_usd": spec.max_order_notional_usd,
+                "required_history_days": spec.required_history_days,
+                "paper_min_days": spec.paper_min_days,
+                "feature_flag": spec.feature_flag,
+                "experimental": spec.experimental,
+                "risks": spec.risks,
+            }
+            status_key = spec.status.value if hasattr(spec.status, "value") else str(spec.status)
+            if status_key in by_status:
+                by_status[status_key].append(entry)
+
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/asset_universe.html",
+            context={"by_status": by_status, "total": len(assets)},
+        )
 
     @app.get("/evidence/export/csv")
     async def evidence_export_csv(x_api_key: str = "") -> Response:

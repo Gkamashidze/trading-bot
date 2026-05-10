@@ -6,6 +6,7 @@
   <title>Trading Bot — Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
     /* Sans-serif for labels/text — monospace only for numbers (.font-mono) */
     body { font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; }
@@ -150,6 +151,50 @@
       </section>
 
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         EXPANDABLE: 📈 Equity Curve — კაპიტალის ცვლილება დროთა განმავლობაში
+         ═══════════════════════════════════════════════════════════════ -->
+    <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-gray-100">📈 Equity Curve</span>
+          <span class="text-xs text-gray-500 font-normal">— ანგარიშის ღირებულება დროის მიხედვით</span>
+        </div>
+        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+      </summary>
+      <div
+        class="px-5 pb-5 pt-2"
+        id="equity-chart-section"
+        hx-get="/partials/equity_chart"
+        hx-trigger="load, every 300s"
+        hx-swap="innerHTML"
+      >
+        <div class="py-4 text-gray-600 text-sm animate-pulse text-center">გრაფიკი იტვირთება...</div>
+      </div>
+    </details>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         EXPANDABLE: 🌐 Asset Universe — ასეტების სამყარო
+         ═══════════════════════════════════════════════════════════════ -->
+    <details class="bg-gray-900 border border-gray-800 rounded-xl">
+      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-gray-100">🌐 Asset Universe</span>
+          <span class="text-xs text-gray-500 font-normal">— ყველა ასეტი: სტატუსი, ლიმიტი, ფაზა</span>
+        </div>
+        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+      </summary>
+      <div
+        class="px-5 pb-5"
+        id="asset-universe-section"
+        hx-get="/partials/asset_universe"
+        hx-trigger="load, every 300s"
+        hx-swap="innerHTML"
+      >
+        <div class="py-4 text-gray-600 text-sm animate-pulse">Asset universe იტვირთება...</div>
+      </div>
+    </details>
 
     <!-- ═══════════════════════════════════════════════════════════════
          EXPANDABLE: 🧭 სიგნალები — ბოტის გადაწყვეტილებები
