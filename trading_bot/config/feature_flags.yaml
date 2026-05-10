@@ -60,3 +60,44 @@ flags:
     description: "Enables synthetic canary trades at market open (Stage 5+)"
     owner: "ops"
     critical: false
+
+  # ── Asset universe — per-group activation flags ───────────────────────────
+  # These flags gate data ingestion and paper trading for each expansion phase.
+  # Flip a flag to promote an asset group from disabled → research → paper.
+  # live_trading_enabled must also be true for any live execution (always false).
+
+  asset_group_crypto_phase1_enabled:
+    default: true
+    description: "Phase 1 crypto: BTC/USDT + ETH/USDT — core paper universe"
+    owner: "quant"
+    critical: false
+
+  asset_group_crypto_phase2_enabled:
+    default: false
+    description: "Phase 2 crypto: SOL/USDT — first expansion candidate"
+    owner: "quant"
+    critical: false
+
+  asset_group_crypto_phase3_enabled:
+    default: false
+    description: "Phase 3 crypto: BNB/USDT + XRP/USDT (lower caps; activate after SOL gates pass)"
+    owner: "quant"
+    critical: false
+
+  asset_group_crypto_phase4_enabled:
+    default: false
+    description: "Phase 4 crypto: LINK/USDT — oracle token (activate after Phase 3 gates pass)"
+    owner: "quant"
+    critical: false
+
+  asset_group_etf_phase5_enabled:
+    default: false
+    description: "Phase 5 ETF basket: SPY/QQQ/SOXX/IWM/TLT/GLD via Alpaca (requires Stage 5 integration)"
+    owner: "quant"
+    critical: false
+
+  asset_experimental_doge_enabled:
+    default: false
+    description: "EXPERIMENTAL: DOGE/USDT high-volatility meme-risk experiment (hard cap 5%, NOT in default universe)"
+    owner: "quant"
+    critical: false

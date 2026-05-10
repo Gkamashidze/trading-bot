@@ -1,0 +1,364 @@
+# asset_universe.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Single source of truth for all assets the trading bot knows about.
+# An asset must appear here before any data ingestion, paper testing, or live
+# trading can occur.
+#
+# Status lifecycle (one-way promotion):
+#   disabled → research → paper → micro_live_candidate → live_candidate
+#
+# Promotion gates
+#   research → paper              requires required_history_days of clean OHLCV
+#   paper → micro_live_candidate  requires paper_min_days + paper_min_trades
+#   micro_live_candidate → live   human operator sign-off in audit log
+#
+# live_trading_enabled is always false at the bot level, regardless of status.
+# Changes to this file go through PR review + CHANGELOG entry.
+# ─────────────────────────────────────────────────────────────────────────────
+
+assets:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 1 — Current paper universe (BTC/ETH)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - symbol: "BTC/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "paper"
+    phase: 1
+    max_capital_pct: 0.30
+    max_order_notional_usd: 10000
+    min_24h_volume_usd: 500000000     # $500 M — deepest crypto market
+    max_spread_bps: 2.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+      - "rsi_mean_reversion"
+    feature_flag: "asset_group_crypto_phase1_enabled"
+    rationale: >
+      Deepest, most liquid crypto market. Reference asset for the entire
+      portfolio. Lowest spread and slippage. Binance spot data available
+      since 2017. Required anchor for all crypto strategies.
+    risks: >
+      High correlation with the overall crypto market (beta ≈ 1).
+      50 %+ drawdowns during bear cycles. Macro / regulatory headlines
+      can trigger sharp intraday moves.
+    experimental: false
+
+  - symbol: "ETH/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "paper"
+    phase: 1
+    max_capital_pct: 0.25
+    max_order_notional_usd: 8000
+    min_24h_volume_usd: 200000000     # $200 M
+    max_spread_bps: 2.5
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+      - "rsi_mean_reversion"
+    feature_flag: "asset_group_crypto_phase1_enabled"
+    rationale: >
+      Second-largest crypto by market cap. Smart-contract layer with distinct
+      fundamentals from BTC (staking yield, gas demand, DeFi activity).
+      High Binance spot liquidity. Historical data available since 2017.
+    risks: >
+      BTC correlation 0.85 +. Network-upgrade events (Merge, EIP changes)
+      can cause volatility spikes. Lower absolute liquidity than BTC.
+    experimental: false
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 2 — First expansion: SOL
+  # Activation gate: 180 days clean OHLCV + asset_group_crypto_phase2_enabled
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - symbol: "SOL/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "research"
+    phase: 2
+    max_capital_pct: 0.20
+    max_order_notional_usd: 5000
+    min_24h_volume_usd: 100000000     # $100 M minimum liquidity gate
+    max_spread_bps: 5.0
+    required_history_days: 180
+    paper_min_days: 45
+    paper_min_trades: 30
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_crypto_phase2_enabled"
+    rationale: >
+      Top-5 crypto by market cap. High-throughput L1 blockchain with distinct
+      validator and DeFi ecosystem. Provides diversification vs BTC/ETH;
+      BTC correlation ≈ 0.75 (lower than ETH). Binance spot data since 2020.
+    risks: >
+      Network outage history (2021–2022 multiple halts). Higher annualised
+      volatility than BTC (≈ 120 % vs 80 % in 2023). Smaller float increases
+      slippage for larger orders. Activate only after 180 days clean data.
+    experimental: false
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 3 — BNB + XRP (lower caps due to ecosystem / regulatory risk)
+  # Activation gate: 180 days clean OHLCV + asset_group_crypto_phase3_enabled
+  # Both assets capped at 10 % due to non-market risks.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - symbol: "BNB/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "disabled"
+    phase: 3
+    max_capital_pct: 0.10             # hard-capped — ecosystem concentration risk
+    max_order_notional_usd: 3000
+    min_24h_volume_usd: 50000000      # $50 M
+    max_spread_bps: 5.0
+    required_history_days: 180
+    paper_min_days: 60
+    paper_min_trades: 40
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_crypto_phase3_enabled"
+    rationale: >
+      Exchange token with utility across the Binance ecosystem (gas fees, Launchpad).
+      Deep liquidity on Binance spot. Historical data available since 2017.
+    risks: >
+      Systemic risk: BNB price is perfectly correlated with Binance exchange
+      health. An exchange outage, hack, or regulatory action would cause
+      simultaneous position loss and broker unavailability. Capped at 10 %.
+      Promote to research only after SOL paper testing completes.
+    experimental: false
+
+  - symbol: "XRP/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "disabled"
+    phase: 3
+    max_capital_pct: 0.10             # hard-capped — regulatory sensitivity
+    max_order_notional_usd: 3000
+    min_24h_volume_usd: 50000000      # $50 M
+    max_spread_bps: 6.0
+    required_history_days: 180
+    paper_min_days: 60
+    paper_min_trades: 40
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_crypto_phase3_enabled"
+    rationale: >
+      Top-10 crypto. Large retail market depth and cross-border payment
+      narrative. Binance spot data available since 2018.
+    risks: >
+      Regulatory sensitivity: SEC vs Ripple lawsuit history creates binary
+      headline risk. News events can move price 20–40 % in hours.
+      Capped at 10 %. Requires separate liquidity/spread check at activation.
+    experimental: false
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 4 — LINK (oracle token, more fundamental use case)
+  # Activation gate: 180 days clean OHLCV + asset_group_crypto_phase4_enabled
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - symbol: "LINK/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "disabled"
+    phase: 4
+    max_capital_pct: 0.15
+    max_order_notional_usd: 4000
+    min_24h_volume_usd: 30000000      # $30 M
+    max_spread_bps: 8.0
+    required_history_days: 180
+    paper_min_days: 45
+    paper_min_trades: 30
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_crypto_phase4_enabled"
+    rationale: >
+      Decentralised oracle leader with strong institutional adoption.
+      Differentiated from pure payment/store-of-value tokens: demand is
+      tied to smart-contract data consumption, not speculation alone.
+      Binance spot data available since 2017.
+    risks: >
+      Smaller market cap than phase 1–3 assets; spread widens in thin
+      markets. BTC correlation ≈ 0.70 (acceptable diversification).
+      Activate only after Phase 3 paper testing gates are passed.
+    experimental: false
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # EXPERIMENTAL — DOGE (NOT in default paper universe; separate flag)
+  # Must remain disabled by default. Enabled only via explicit flag flip
+  # + 90-day paper evidence review.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - symbol: "DOGE/USDT"
+    venue: "binance"
+    asset_class: "crypto"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.05             # absolute maximum: 5 %
+    max_order_notional_usd: 1000
+    min_24h_volume_usd: 20000000      # $20 M — high volume but meme-driven
+    max_spread_bps: 10.0
+    required_history_days: 90
+    paper_min_days: 90
+    paper_min_trades: 60
+    enabled_strategies: []            # no strategies assigned until research completes
+    feature_flag: "asset_experimental_doge_enabled"
+    rationale: >
+      High-volatility meme-risk experiment only. Isolated under a separate
+      feature flag with a 5 % hard cap. Not part of the default paper universe.
+    risks: >
+      No fundamental floor. Social-media / celebrity-driven (Elon Musk tweets
+      have moved price 30 %+ in minutes). Correlated with broad crypto
+      sentiment, not intrinsic value. Hard cap 5 %. 90-day minimum paper
+      observation before any promotion review.
+    experimental: true
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 5 — ETF basket (requires Alpaca integration; all disabled until
+  # Stage 5 execution engine is wired for Alpaca paper API)
+  # Note: market hours (09:30–16:00 ET), trading calendar, and fractional
+  # shares logic all differ from crypto — activate as a coordinated group.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - symbol: "SPY"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.30
+    max_order_notional_usd: 15000
+    min_24h_volume_usd: 1000000000    # $1 B+ — most liquid ETF globally
+    max_spread_bps: 1.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      S&P 500 tracker. Most liquid ETF globally ($200 B+ AUM).
+      Portfolio anchor for equity exposure. yfinance data available since 1993.
+    risks: >
+      Market-hours only (09:30–16:00 ET). Negative correlation with crypto
+      in risk-off. Requires Alpaca integration and NYSE calendar support.
+    experimental: false
+
+  - symbol: "QQQ"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.25
+    max_order_notional_usd: 12000
+    min_24h_volume_usd: 500000000     # $500 M+
+    max_spread_bps: 1.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      Nasdaq-100 tracker. Tech-heavy ($200 B+ AUM). Positive correlation
+      with ETH/growth assets; useful for cross-asset signal confirmation.
+    risks: >
+      SPY correlation 0.90+. Rate-sensitive. Concentrated in top-10 tech names.
+    experimental: false
+
+  - symbol: "SOXX"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.15
+    max_order_notional_usd: 5000
+    min_24h_volume_usd: 50000000      # $50 M
+    max_spread_bps: 3.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      Semiconductor sector ETF ($10 B+ AUM). Exposure to AI/chip cycle
+      distinct from broad market. Useful thematic signal.
+    risks: >
+      Sector concentration. Geopolitical risk (Taiwan semiconductor supply).
+      Lower liquidity than SPY/QQQ; spread can widen on earnings weeks.
+    experimental: false
+
+  - symbol: "IWM"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.15
+    max_order_notional_usd: 5000
+    min_24h_volume_usd: 100000000     # $100 M
+    max_spread_bps: 2.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      Russell 2000 small-cap tracker ($60 B+ AUM). SPY correlation ≈ 0.80
+      — meaningful diversification within US equity. Economic-cycle exposure.
+    risks: >
+      Higher volatility than large-cap ETFs. Credit-sensitive — small caps
+      hit harder during recessions. Less liquid than SPY in stressed markets.
+    experimental: false
+
+  - symbol: "TLT"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.20
+    max_order_notional_usd: 8000
+    min_24h_volume_usd: 100000000     # $100 M
+    max_spread_bps: 2.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      20+ year Treasury bond ETF ($45 B+ AUM). Historically negative
+      correlation with equities in risk-off events. Portfolio hedge / flight-to-safety.
+    risks: >
+      Duration risk — highly rate-sensitive. 2022 drawdown reached -33 %.
+      Negative equity correlation breaks down in stagflationary regimes.
+    experimental: false
+
+  - symbol: "GLD"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.15
+    max_order_notional_usd: 5000
+    min_24h_volume_usd: 50000000      # $50 M
+    max_spread_bps: 2.0
+    required_history_days: 365
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      Gold ETF ($60 B+ AUM). Inflation hedge with low correlation to equities
+      (0.1–0.3) and crypto (≈ 0.1). Provides genuine diversification.
+    risks: >
+      Tracks physical gold — no yield. Negative real-rate sensitive.
+      Storage and custody costs embedded in expense ratio (0.40 % p.a.).
+    experimental: false

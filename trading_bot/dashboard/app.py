@@ -654,7 +654,7 @@ def create_app() -> FastAPI:
             assets = []
 
         # Group for template
-        by_status: dict[str, list[dict]] = {
+        by_status: dict[str, list[dict[str, Any]]] = {
             "paper": [],
             "research": [],
             "disabled": [],
