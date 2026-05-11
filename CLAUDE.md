@@ -74,6 +74,20 @@ Breaking changes: append `!` after scope: `feat(core)!: rename OHLCVBar fields`
 3. Push directly: `git push origin main`
 4. Sync before starting new work: `git fetch origin && git pull --ff-only origin main`
 
+## Deployment Workflow (Railway)
+
+After every successful coding session, the changes MUST be deployed to Railway.
+Railway auto-deploys from the default branch (`main`) on every push.
+
+Steps:
+1. Commit changes on the development branch
+2. Push the development branch to GitHub
+3. Merge into `main` (via PR if `main` is protected, otherwise directly)
+4. Pushing to `main` triggers Railway auto-deploy — no manual deploy needed
+
+Config: `railway.toml` (Dockerfile builder, `alembic upgrade head` preDeploy,
+`python -m trading_bot.main` start, `/readyz` healthcheck).
+
 ## Key Constraints
 
 - **NO live trading until Stage 5** — `live_trading_enabled = false` always
