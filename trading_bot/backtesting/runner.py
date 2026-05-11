@@ -1,18 +1,23 @@
 """Backtesting runner — loads bars, runs all registered strategies, caches results.
 
 Data lineage enforcement:
-    Every backtest run must have a valid dataset_snapshot_id registered in the
-    LineageStore.  Runs without a valid snapshot ID are rejected.  This ensures
-    all BacktestResult objects are traceable to the exact data they used.
+    Every backtest run is tied to a dataset_snapshot_id registered in the
+    LineageStore.  When a symbol has no snapshot (e.g. bars predate lineage
+    tracking, or the in-memory store was cleared on restart), a snapshot is
+    auto-registered from the loaded bars' metadata so backtests remain
+    reproducible without requiring an explicit registration step.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pandas as pd
+
 from trading_bot.backtesting.config import BacktestConfig
 from trading_bot.backtesting.engine import BacktestEngine
 from trading_bot.backtesting.result import BacktestResult
+from trading_bot.core.models import DataLineage
 from trading_bot.data.lineage import LineageStore, get_lineage_store
 from trading_bot.observability.logging import get_logger
 from trading_bot.strategies.runner import _STRATEGIES, _load_bars
@@ -44,15 +49,44 @@ def _resolve_snapshot_id(symbol: str, lineage_store: LineageStore) -> str | None
     return max(snapshots, key=lambda s: s.created_at).snapshot_id
 
 
+def _auto_register_snapshot(
+    symbol: str,
+    timeframe: str,
+    exchange: str,
+    bars: pd.DataFrame,
+    lineage_store: LineageStore,
+) -> str:
+    """Register a deterministic snapshot derived from loaded bars metadata.
+
+    Used when no explicit snapshot exists — covers data backfilled before
+    lineage tracking and recovers from in-memory store loss on restart.
+    Idempotent: identical bars produce the same snapshot ID.
+    """
+    symbol_safe = symbol.replace("/", "_").replace(":", "_")
+    last_ts = pd.to_datetime(bars["open_time"].max(), utc=True).to_pydatetime()
+    lineage = DataLineage(
+        source=f"{exchange}.fetch_ohlcv",
+        fetched_at=last_ts,
+        row_count=len(bars),
+        provider=exchange,
+        exchange=exchange.upper(),
+        symbol=symbol,
+        timeframe=timeframe,
+        storage_path=f"{exchange}/{symbol_safe}/{timeframe}",
+    )
+    return lineage_store.create_snapshot(lineage)
+
+
 async def run_backtests(
     require_lineage: bool = True,
 ) -> list[BacktestResult]:
     """Run backtests for all registered strategies across all configured symbols.
 
     Args:
-        require_lineage: If True (default), raises LineageError when no valid
-            dataset snapshot exists for a symbol.  Set to False only in tests
-            that use synthetic data with no lineage store entry.
+        require_lineage: If True (default), auto-registers a snapshot derived
+            from loaded bars when none exists, so results remain traceable.
+            Set to False only in tests where snapshot tracking is irrelevant
+            and an empty `dataset_snapshot_id` is acceptable.
     """
     global _last_results, _last_computed_at
 
@@ -74,17 +108,25 @@ async def run_backtests(
         snapshot_id = _resolve_snapshot_id(symbol, lineage_store)
         if snapshot_id is None:
             if require_lineage:
-                raise LineageError(
-                    f"No dataset snapshot registered for symbol '{symbol}'. "
-                    "Register a DataLineage snapshot via get_lineage_store().create_snapshot() "
-                    "before running backtests."
+                snapshot_id = _auto_register_snapshot(
+                    symbol=symbol,
+                    timeframe=crypto.timeframes[0],
+                    exchange=crypto.exchange,
+                    bars=bars,
+                    lineage_store=lineage_store,
                 )
-            snapshot_id = ""
-            log.warning(
-                "backtest_no_lineage",
-                symbol=symbol,
-                note="lineage not required — proceeding with empty snapshot_id",
-            )
+                log.info(
+                    "backtest_auto_snapshot_registered",
+                    symbol=symbol,
+                    snapshot_id=snapshot_id[:12],
+                )
+            else:
+                snapshot_id = ""
+                log.warning(
+                    "backtest_no_lineage",
+                    symbol=symbol,
+                    note="lineage not required — proceeding with empty snapshot_id",
+                )
 
         for strategy in _STRATEGIES:
             try:

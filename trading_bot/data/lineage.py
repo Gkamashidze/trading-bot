@@ -79,6 +79,10 @@ class LineageStore:
     """In-memory store of dataset snapshots.
 
     Thread-safe (GIL-protected).  Snapshots are immutable after creation.
+
+    Note: process-local and lost on restart. See ADR-0009 for the
+    PostgreSQL-backed migration plan, triggered when Stage 5 begins or
+    cross-restart provenance is required.
     """
 
     def __init__(self) -> None:

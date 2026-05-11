@@ -393,6 +393,28 @@ def create_app() -> FastAPI:
                     end=end,
                 )
                 await exchange.close()  # type: ignore[attr-defined]
+                if bars > 0:
+                    from trading_bot.core.models import DataLineage
+                    from trading_bot.data.lineage import get_lineage_store
+
+                    symbol_safe = symbol.replace("/", "_").replace(":", "_")
+                    snapshot_id = get_lineage_store().create_snapshot(
+                        DataLineage(
+                            source="binance.fetch_ohlcv",
+                            fetched_at=datetime.now(UTC),
+                            row_count=bars,
+                            provider="binance",
+                            exchange="BINANCE",
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            storage_path=f"binance/{symbol_safe}/{timeframe}",
+                        )
+                    )
+                    log.info(
+                        "backfill_snapshot_registered",
+                        symbol=symbol,
+                        snapshot_id=snapshot_id[:12],
+                    )
                 _backfill_status["running"] = False
                 _backfill_status["finished_at"] = datetime.now(UTC).isoformat()
                 _backfill_status["bars_stored"] = bars
