@@ -55,6 +55,8 @@ def capture_snapshot() -> StateSnapshot:
             "qty": float(p.quantity),
             "avg_cost": float(p.average_cost),
             "current_price": float(p.current_price),
+            "opened_at": p.opened_at.isoformat() if p.opened_at else None,
+            "strategy_id": p.strategy_id or "",
         }
         for p in snap.positions
     ]

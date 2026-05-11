@@ -85,6 +85,28 @@ class CircuitBreaker:
         """Return False when tier >= 2 (full halt or emergency)."""
         return self._current_tier < 2
 
+    def restore_state(
+        self,
+        tier: int,
+        peak_tier: int,
+        tripped_at: str | None,
+    ) -> None:
+        """Restore circuit breaker tier from a disaster-recovery snapshot.
+
+        Called once on startup after portfolio is rebuilt.  Only applies a
+        non-zero tier so that a crashed bot that was in emergency-halt stays
+        halted until the operator explicitly clears it or UTC midnight resets.
+        """
+        self._current_tier = tier
+        self._peak_tier_today = peak_tier
+        self._tripped_at = datetime.fromisoformat(tripped_at) if tripped_at else None
+        log.info(
+            "circuit_breaker_restored",
+            tier=tier,
+            peak_tier=peak_tier,
+            tripped_at=tripped_at,
+        )
+
     def reset_day(self) -> None:
         """Reset for a new trading day (call at UTC midnight).
 

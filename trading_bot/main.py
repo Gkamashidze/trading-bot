@@ -117,6 +117,29 @@ async def _startup() -> tuple[
         tracker = init_tracker(pool)
         await tracker.load_recent()
 
+        # ── Portfolio crash-recovery restore ─────────────────────────────────
+        # 1. Load latest on-disk snapshot (hourly, /data/snapshots/).
+        # 2. Replay any paper_orders fills that arrived after the snapshot.
+        # This closes the gap for crashes between hourly snapshot writes.
+        from trading_bot.portfolio.rebuilder import rebuild_portfolio
+        from trading_bot.safety.circuit_breaker import get_circuit_breaker
+
+        _snap, _fills = await rebuild_portfolio(pool)
+        if _snap is not None:
+            get_circuit_breaker().restore_state(
+                tier=_snap.cb_tier,
+                peak_tier=_snap.cb_peak_tier,
+                tripped_at=_snap.cb_tripped_at,
+            )
+            log.info(
+                "startup_restore_complete",
+                snapshot_captured_at=_snap.captured_at,
+                fills_replayed=_fills,
+                cb_tier=_snap.cb_tier,
+            )
+        else:
+            log.info("startup_restore_cold_start", fills_replayed=_fills)
+
         # Evidence store — start or resume paper testing session
         if settings.evidence.enabled:
             import os
@@ -206,6 +229,16 @@ async def _startup() -> tuple[
         )
     else:
         await alerter.send_startup(environment=settings.environment, stage="0")
+
+    # ── DATA_PATH volume sanity check ─────────────────────────────────────
+    _data_path = os.environ.get("DATA_PATH", "data/raw")
+    if not _data_path.startswith("/data"):
+        log.warning(
+            "data_path_not_on_persistent_volume",
+            data_path=_data_path,
+            note="OHLCV and snapshots will be lost on redeploy — "
+            "mount Railway Volume and set DATA_PATH=/data/raw",
+        )
 
     # ── Startup Diagnostics ───────────────────────────────────────────────
     log.info(

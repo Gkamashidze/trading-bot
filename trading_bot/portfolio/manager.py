@@ -12,6 +12,10 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from trading_bot.disaster_recovery.snapshotter import StateSnapshot
 
 from trading_bot.core.models import (
     AssetClass,
@@ -141,6 +145,45 @@ class PortfolioManager:
             total_equity=total_equity,
             daily_pnl=daily_pnl,
             daily_drawdown_pct=daily_dd,
+        )
+
+    def restore_from_snapshot(self, snap: StateSnapshot) -> None:
+        """Replace all in-memory state from a disaster-recovery snapshot.
+
+        Backwards-compatible: old snapshots without opened_at / strategy_id
+        use safe defaults (now() and empty string).
+        """
+        self._cash = Decimal(str(snap.cash_balance))
+        self._equity_at_day_start = Decimal(str(snap.total_equity))
+
+        self._qty.clear()
+        self._avg_cost.clear()
+        self._current_price.clear()
+        self._opened_at.clear()
+        self._strategy_id.clear()
+
+        for pos in snap.positions:
+            sym = str(pos["symbol"])
+            self._qty[sym] = Decimal(str(pos["qty"]))
+            self._avg_cost[sym] = Decimal(str(pos["avg_cost"]))
+            self._current_price[sym] = Decimal(str(pos["current_price"]))
+
+            raw_opened = pos.get("opened_at")
+            if raw_opened:
+                try:
+                    self._opened_at[sym] = datetime.fromisoformat(str(raw_opened))
+                except ValueError:
+                    self._opened_at[sym] = datetime.now(UTC)
+            else:
+                self._opened_at[sym] = datetime.now(UTC)
+
+            self._strategy_id[sym] = str(pos.get("strategy_id", ""))
+
+        log.info(
+            "portfolio_restored_from_snapshot",
+            cash=str(self._cash),
+            positions=len(self._qty),
+            captured_at=snap.captured_at,
         )
 
     def reset_day(self) -> None:
