@@ -22,7 +22,8 @@ from trading_bot.observability.logging import get_logger
 log = get_logger(__name__)
 
 _BASE = "https://api.stlouisfed.org/fred/series/observations"
-_TTL = timedelta(hours=24)
+_TTL_SUCCESS = timedelta(hours=24)
+_TTL_FAILURE = timedelta(hours=1)  # retry sooner after a transient API error
 
 
 class MacroProvider:
@@ -47,7 +48,8 @@ class MacroProvider:
             self._fed_rate = await self._fetch_fed_rate(client)
             self._cpi_yoy = await self._fetch_cpi_yoy(client)
 
-        self._expires_at = now + _TTL
+        success = self._fed_rate is not None or self._cpi_yoy is not None
+        self._expires_at = now + (_TTL_SUCCESS if success else _TTL_FAILURE)
         log.info("macro_fetched", fed_rate=self._fed_rate, cpi_yoy=self._cpi_yoy)
         return self._fed_rate, self._cpi_yoy
 
@@ -68,8 +70,8 @@ class MacroProvider:
             if obs and obs[0]["value"] != ".":
                 return float(obs[0]["value"])
         except Exception as e:
-            log.error("fred_fedfunds_failed", error=str(e))
-            await _send_context_alert("FRED Fed Funds Rate API failure", str(e))
+            log.warning("fred_fedfunds_failed", error=str(e))
+            await _send_context_alert("FRED Fed Funds Rate მიუწვდომელია", str(e))
         return None
 
     async def _fetch_cpi_yoy(self, client: httpx.AsyncClient) -> float | None:
@@ -91,8 +93,8 @@ class MacroProvider:
                 year_ago = float(obs[12]["value"])
                 return round((latest / year_ago - 1) * 100, 2)
         except Exception as e:
-            log.error("fred_cpi_failed", error=str(e))
-            await _send_context_alert("FRED CPI API failure", str(e))
+            log.warning("fred_cpi_failed", error=str(e))
+            await _send_context_alert("FRED CPI მიუწვდომელია", str(e))
         return None
 
 
@@ -101,4 +103,4 @@ async def _send_context_alert(title: str, detail: str) -> None:
 
     alerter = TelegramAlerter.from_env_optional()
     if alerter:
-        await alerter.send(AlertLevel.ERROR, title, detail=detail[:300])
+        await alerter.send(AlertLevel.WARNING, title, detail=detail[:300])
