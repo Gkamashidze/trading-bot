@@ -159,6 +159,8 @@ def create_app() -> FastAPI:
         uptime = int(time.time() - _start_time)
         hours, remainder = divmod(uptime, 3600)
         minutes, seconds = divmod(remainder, 60)
+        cache = get_price_cache()
+        ws_live = len(cache.snapshot()) > 0
         return templates.TemplateResponse(
             request=request,
             name="partials/status.html",
@@ -167,6 +169,7 @@ def create_app() -> FastAPI:
                 "scheduler_running": _scheduler is not None and _scheduler.running,
                 "uptime": f"{hours:02d}:{minutes:02d}:{seconds:02d}",
                 "stage": "8",
+                "ws_live": ws_live,
             },
         )
 

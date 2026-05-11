@@ -36,6 +36,7 @@ from trading_bot.database.connection import close_pool, init_pool
 from trading_bot.feature_flags.store import FeatureFlagStore, set_default_store
 from trading_bot.idempotency.decorator import set_default_store as set_idem_store
 from trading_bot.idempotency.store import PostgresIdempotencyStore
+from trading_bot.market_context import refresh_market_context
 from trading_bot.observability.logging import configure_logging, get_logger
 from trading_bot.observability.metrics import start_metrics_server
 from trading_bot.observability.tracing import configure_tracing
@@ -193,6 +194,11 @@ async def _startup() -> tuple[
     del _signal_task  # fire-and-forget: task runs independently
     _bt_task = asyncio.create_task(run_backtests(), name="initial_backtest")
     del _bt_task  # fire-and-forget: task runs independently
+    if settings.market_context.enabled:
+        _mc_task = asyncio.create_task(
+            refresh_market_context(), name="initial_market_context_refresh"
+        )
+        del _mc_task  # fire-and-forget: task runs independently
     log.info("signal_refresh_scheduled")
 
     # ── Telegram Operator Command Handler (Stage 7) ───────────────────────

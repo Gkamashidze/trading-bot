@@ -82,8 +82,13 @@ Railway auto-deploys from the default branch (`main`) on every push.
 Steps:
 1. Commit changes on the development branch
 2. Push the development branch to GitHub
-3. Merge into `main` (via PR if `main` is protected, otherwise directly)
-4. Pushing to `main` triggers Railway auto-deploy — no manual deploy needed
+3. **Create a Pull Request** for the user to review and merge
+4. User merges PR into `main` — Railway auto-deploy triggers automatically
+5. No manual deploy needed
+
+**IMPORTANT:** Always create a PR at the end of every coding session so the user
+can review and approve changes before they reach production (`main` is protected).
+Never push directly to `main`.
 
 Config: `railway.toml` (Dockerfile builder, `alembic upgrade head` preDeploy,
 `python -m trading_bot.main` start, `/readyz` healthcheck).
