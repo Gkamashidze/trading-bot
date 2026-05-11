@@ -24,6 +24,11 @@ Last updated: 2026-05-11
 - Postgres RiskStateStore
 - BinanceOrderBookProvider
 - GoLiveGate.evaluate()
+- `_last_signal` persistence to `/data/last_signal.json`
+  - File: `trading_bot/execution/router.py`, module-level `_last_signal: dict[str, str]`
+  - Risk: cross-day restart without this → bot sees prev="HOLD", could re-execute BUY
+  - Idempotency + portfolio restore cover paper trading; NOT sufficient for live
+  - Implementation: save to volume on each signal update, load on startup
 
 ## Build Before Live
 - AuditReplayer
