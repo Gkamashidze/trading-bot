@@ -103,6 +103,7 @@ class TelegramCommandHandler:
         """Long-poll loop — exits when shutdown is requested."""
         log.info("telegram_command_handler_started", chat_id=self._authorized_chat_id)
         async with httpx.AsyncClient(timeout=_POLL_TIMEOUT + 5) as client:
+            await self._register_commands(client)
             while not is_shutdown_requested():
                 try:
                     await self._poll_once(client)
@@ -110,6 +111,35 @@ class TelegramCommandHandler:
                     log.warning("telegram_poll_error", error=str(e))
 
         log.info("telegram_command_handler_stopped")
+
+    async def _register_commands(self, client: httpx.AsyncClient) -> None:
+        """Register bot command menu via setMyCommands (shows on '/' in Telegram)."""
+        commands = [
+            # ── ინფორმაცია ────────────────────────────────────────────────
+            {"command": "status", "description": "სისტემის სტატუსი — DB, scheduler, uptime"},
+            {"command": "portfolio", "description": "პორტფელი — equity, cash, P&L, პოზიციები"},
+            {"command": "cb", "description": "Circuit Breaker — tier, drawdown, ბოლო შემოწმება"},
+            {"command": "exposure", "description": "ექსპოზიცია — per-asset კაპიტალი %"},
+            {"command": "open_orders", "description": "ღია ორდერები OMS-ში"},
+            {"command": "reconcile", "description": "ბოლო რეკონცილიაციის ანგარიში"},
+            {"command": "help", "description": "ყველა ბრძანების სია"},
+            # ── მართვა ────────────────────────────────────────────────────
+            {"command": "kill", "description": "🔴 Kill switch — ქაღალდური ვაჭრობა ჩართ/გამორთ"},
+            {"command": "pause", "description": "⏸ სტრატეგიის პაუზა — /pause sma_crossover"},
+            {"command": "resume", "description": "▶️ სტრატეგიის გაშვება — /resume sma_crossover"},
+            {"command": "reduce_risk", "description": "⚠️ Reduced Risk რეჟიმი — /reduce_risk <id>"},
+            {"command": "cancel_all", "description": "❌ ყველა ღია ორდერის გაუქმება"},
+            {"command": "ack", "description": "✅ Alert-ის დასტური — /ack <alert_id>"},
+        ]
+        url = _TELEGRAM_API.format(token=self._token, method="setMyCommands")
+        try:
+            resp = await client.post(url, json={"commands": commands}, timeout=10)
+            if resp.status_code == 200 and resp.json().get("ok"):
+                log.info("telegram_commands_registered", count=len(commands))
+            else:
+                log.warning("telegram_commands_register_failed", response=resp.text[:200])
+        except Exception as exc:
+            log.warning("telegram_commands_register_error", error=str(exc))
 
     async def _poll_once(self, client: httpx.AsyncClient) -> None:
         url = _TELEGRAM_API.format(token=self._token, method="getUpdates")
