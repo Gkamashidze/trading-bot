@@ -55,6 +55,8 @@ trading_bot/data/processed/
 *.parquet
 data/last_signal.json
 data/last_signal.json.tmp
+data/lineage_store.json
+data/lineage_store.json.tmp
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 trading_bot/logs/*.log

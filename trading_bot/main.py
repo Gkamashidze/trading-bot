@@ -114,6 +114,14 @@ async def _startup() -> tuple[
         idem_store = PostgresIdempotencyStore(pool)
         set_idem_store(idem_store)
 
+        # Risk state — Postgres-backed so drawdown/kill-switch state survives restarts
+        from trading_bot.state.risk_state import PostgresRiskStateStore, set_risk_state_store
+
+        _risk_store = PostgresRiskStateStore(pool)
+        await _risk_store._ensure_row()
+        set_risk_state_store(_risk_store)
+        log.info("risk_state_store_initialized", backend="postgres")
+
         # OMS tracker — wire pool and rehydrate order history from DB
         tracker = init_tracker(pool)
         await tracker.load_recent()

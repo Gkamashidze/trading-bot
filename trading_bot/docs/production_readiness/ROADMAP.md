@@ -14,21 +14,17 @@ Last updated: 2026-05-11
 - trading_bot/execution/post_trade.py
 - trading_bot/promotion/micro_live.py
 - trading_bot/monitoring/decay.py
-- trading_bot/state/risk_state.py
+- trading_bot/state/risk_state.py (InMemoryRiskStateStore + PostgresRiskStateStore)
 - trading_bot/exchange/precision.py
 - trading_bot/exchange/fake_exchange.py
 - trading_bot/orderbook/models.py
+- trading_bot/execution/router.py — `_last_signal` persisted to `/data/last_signal.json`
+- trading_bot/data/lineage.py — `LineageStore` persisted to `/data/lineage_store.json`
 107 unit tests, ruff + mypy clean.
 
 ## Build Before Micro-Live
-- Postgres RiskStateStore
 - BinanceOrderBookProvider
 - GoLiveGate.evaluate()
-- `_last_signal` persistence to `/data/last_signal.json`
-  - File: `trading_bot/execution/router.py`, module-level `_last_signal: dict[str, str]`
-  - Risk: cross-day restart without this → bot sees prev="HOLD", could re-execute BUY
-  - Idempotency + portfolio restore cover paper trading; NOT sufficient for live
-  - Implementation: save to volume on each signal update, load on startup
 
 ## Build Before Live
 - AuditReplayer

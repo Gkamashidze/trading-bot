@@ -4,8 +4,9 @@ Moves authoritative risk state out of process memory into a shared, persistent
 store. Both the RiskEngine and the operator console read/write this store,
 ensuring a single source of truth even across restarts.
 
-Current implementation: InMemoryRiskStateStore (survives within a process).
-Future: PostgresRiskStateStore — see TODO below and ROADMAP.md Area #5.
+Implementations:
+  InMemoryRiskStateStore  — single-process, lost on restart (dev / no-DB fallback)
+  PostgresRiskStateStore  — single-row upsert, survives restarts and multi-worker
 
 All state changes are append-only from the caller's perspective; the store
 records a timestamp and actor for each mutation to support audit replay.
@@ -19,7 +20,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    import asyncpg
 
 
 class EmergencyHaltReason(StrEnum):
@@ -270,6 +274,221 @@ class InMemoryRiskStateStore(RiskStateStore):
         self._state.last_updated_at = datetime.now(UTC)
         self._state.last_updated_by = actor
         self._state.version += 1
+
+
+class PostgresRiskStateStore(RiskStateStore):
+    """Single-row Postgres risk state store (id=1).
+
+    Survives process restarts. Call _ensure_row() once at startup to seed the row.
+    Fails closed on DB errors — get_snapshot() returns safe defaults rather than raising.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def _ensure_row(self) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute("INSERT INTO risk_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
+
+    async def get_snapshot(self) -> RiskStateSnapshot:
+        try:
+            async with self._pool.acquire() as conn:
+                row = await conn.fetchrow("SELECT * FROM risk_state WHERE id = 1")
+            if row is None:
+                return RiskStateSnapshot()
+            halt_reason: EmergencyHaltReason | None = None
+            if row["emergency_halt_reason"] is not None:
+                try:
+                    halt_reason = EmergencyHaltReason(row["emergency_halt_reason"])
+                except ValueError:
+                    pass
+            return RiskStateSnapshot(
+                strategy_states=dict(row["strategy_states"] or {}),
+                kill_switch_active=row["kill_switch_active"],
+                kill_switch_reason=row["kill_switch_reason"] or "",
+                kill_switch_activated_by=row["kill_switch_activated_by"] or "",
+                kill_switch_activated_at=row["kill_switch_activated_at"],
+                reconciler_block_active=row["reconciler_block_active"],
+                reconciler_block_reason=row["reconciler_block_reason"] or "",
+                daily_loss_usd=Decimal(str(row["daily_loss_usd"])),
+                weekly_loss_usd=Decimal(str(row["weekly_loss_usd"])),
+                capital_allocation_overrides={
+                    k: float(v) for k, v in (row["capital_allocation_overrides"] or {}).items()
+                },
+                operator_locks=dict(row["operator_locks"] or {}),
+                emergency_halt_active=row["emergency_halt_active"],
+                emergency_halt_reason=halt_reason,
+                emergency_halt_at=row["emergency_halt_at"],
+                emergency_halt_by=row["emergency_halt_by"] or "",
+                last_updated_at=row["last_updated_at"] or datetime.now(UTC),
+                last_updated_by=row["last_updated_by"] or "system",
+                version=row["version"],
+            )
+        except Exception as exc:
+            _log().warning("risk_state_get_failed", error=str(exc))
+            return RiskStateSnapshot()
+
+    async def activate_kill_switch(self, reason: str, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    kill_switch_active = TRUE, kill_switch_reason = $1,
+                    kill_switch_activated_by = $2, kill_switch_activated_at = NOW(),
+                    last_updated_at = NOW(), last_updated_by = $2, version = version + 1
+                WHERE id = 1""",
+                reason,
+                actor,
+            )
+
+    async def deactivate_kill_switch(self, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    kill_switch_active = FALSE, kill_switch_reason = '',
+                    kill_switch_activated_at = NULL,
+                    last_updated_at = NOW(), last_updated_by = $1, version = version + 1
+                WHERE id = 1""",
+                actor,
+            )
+
+    async def activate_emergency_halt(self, reason: EmergencyHaltReason, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    emergency_halt_active = TRUE, emergency_halt_reason = $1,
+                    emergency_halt_at = NOW(), emergency_halt_by = $2,
+                    last_updated_at = NOW(), last_updated_by = $2, version = version + 1
+                WHERE id = 1""",
+                reason.value,
+                actor,
+            )
+
+    async def clear_emergency_halt(self, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    emergency_halt_active = FALSE, emergency_halt_reason = NULL,
+                    emergency_halt_at = NULL, emergency_halt_by = '',
+                    last_updated_at = NOW(), last_updated_by = $1, version = version + 1
+                WHERE id = 1""",
+                actor,
+            )
+
+    async def set_reconciler_block(self, active: bool, reason: str, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    reconciler_block_active = $1, reconciler_block_reason = $2,
+                    last_updated_at = NOW(), last_updated_by = $3, version = version + 1
+                WHERE id = 1""",
+                active,
+                reason if active else "",
+                actor,
+            )
+
+    async def set_strategy_state(self, strategy_id: str, state: str, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    strategy_states = strategy_states
+                        || jsonb_build_object($1::text, $2::text),
+                    last_updated_at = NOW(), last_updated_by = $3, version = version + 1
+                WHERE id = 1""",
+                strategy_id,
+                state,
+                actor,
+            )
+
+    _RECORD_LOSS_SQL: ClassVar[dict[str, str]] = {
+        "daily": """UPDATE risk_state SET
+            daily_loss_usd = daily_loss_usd + $1,
+            last_updated_at = NOW(), last_updated_by = 'system', version = version + 1
+        WHERE id = 1""",
+        "weekly": """UPDATE risk_state SET
+            weekly_loss_usd = weekly_loss_usd + $1,
+            last_updated_at = NOW(), last_updated_by = 'system', version = version + 1
+        WHERE id = 1""",
+    }
+
+    _RESET_LOSS_SQL: ClassVar[dict[str, str]] = {
+        "daily": """UPDATE risk_state SET
+            daily_loss_usd = 0,
+            last_updated_at = NOW(), last_updated_by = $1, version = version + 1
+        WHERE id = 1""",
+        "weekly": """UPDATE risk_state SET
+            weekly_loss_usd = 0,
+            last_updated_at = NOW(), last_updated_by = $1, version = version + 1
+        WHERE id = 1""",
+    }
+
+    async def record_loss(self, loss_usd: Decimal, period: str) -> None:
+        sql = self._RECORD_LOSS_SQL.get(period)
+        if sql is None:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(sql, loss_usd)
+
+    async def reset_loss_budget(self, period: str, actor: str) -> None:
+        sql = self._RESET_LOSS_SQL.get(period)
+        if sql is None:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(sql, actor)
+
+    async def set_capital_override(
+        self, strategy_id: str, capital_pct: float | None, actor: str
+    ) -> None:
+        async with self._pool.acquire() as conn:
+            if capital_pct is None:
+                await conn.execute(
+                    """UPDATE risk_state SET
+                        capital_allocation_overrides = capital_allocation_overrides - $1,
+                        last_updated_at = NOW(), last_updated_by = $2, version = version + 1
+                    WHERE id = 1""",
+                    strategy_id,
+                    actor,
+                )
+            else:
+                await conn.execute(
+                    """UPDATE risk_state SET
+                        capital_allocation_overrides = capital_allocation_overrides
+                            || jsonb_build_object($1::text, $2::float8),
+                        last_updated_at = NOW(), last_updated_by = $3, version = version + 1
+                    WHERE id = 1""",
+                    strategy_id,
+                    capital_pct,
+                    actor,
+                )
+
+    async def set_operator_lock(self, resource: str, label: str, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    operator_locks = operator_locks
+                        || jsonb_build_object($1::text, $2::text),
+                    last_updated_at = NOW(), last_updated_by = $3, version = version + 1
+                WHERE id = 1""",
+                resource,
+                label,
+                actor,
+            )
+
+    async def clear_operator_lock(self, resource: str, actor: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE risk_state SET
+                    operator_locks = operator_locks - $1,
+                    last_updated_at = NOW(), last_updated_by = $2, version = version + 1
+                WHERE id = 1""",
+                resource,
+                actor,
+            )
+
+
+def _log() -> Any:
+    from trading_bot.observability.logging import get_logger
+
+    return get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
