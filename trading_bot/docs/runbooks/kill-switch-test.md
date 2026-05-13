@@ -2,7 +2,7 @@
 
 **Runbook ID:** RB-0002
 **Severity:** Test procedure (not an incident response)
-**Last Tested:** _TBD — run before micro-live promotion_
+**Last Tested:** 2026-05-13 — PASSED (latency < 1s, all steps)
 **Owner:** Operator
 **Related Gate:** ROADMAP_LIVE.md Gate 0 — *"Kill switch tested: operator can halt system within 60 seconds from Telegram"*
 
