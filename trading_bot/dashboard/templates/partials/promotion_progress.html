@@ -1,0 +1,139 @@
+{% set tier_labels = {
+  'shadow': 'Shadow (სიგნალები)',
+  'paper': 'Paper (ვირტ. ფული)',
+  'micro_live': 'Micro-Live ($50 max)',
+  'live': 'Live (სრული)',
+} %}
+
+{% set strategy_labels = {
+  'sma_crossover': '📈 SMA Crossover',
+  'rsi_mean_reversion': '📊 RSI Mean Reversion',
+} %}
+
+{% macro progress_row(label, current, target, ok, format='int', suffix='') %}
+{% set pct = (current / target * 100) if target > 0 else 0 %}
+{% set pct = [pct, 100] | min %}
+<div>
+  <div class="flex justify-between text-xs mb-0.5">
+    <span class="text-gray-400">{{ label }}</span>
+    <span class="font-mono {% if ok %}text-green-400{% else %}text-yellow-400{% endif %}">
+      {% if ok %}✅{% else %}⏳{% endif %}
+      {% if format == 'pct' %}{{ "%.1f"|format(current * 100) }}%{% elif format == 'float' %}{{ "%.2f"|format(current) }}{% else %}{{ current }}{% endif %}{{ suffix }}
+      <span class="text-gray-600">/ {% if format == 'pct' %}{{ "%.0f"|format(target * 100) }}%{% elif format == 'float' %}{{ "%.2f"|format(target) }}{% else %}{{ target }}{% endif %}{{ suffix }}</span>
+    </span>
+  </div>
+  <div class="w-full bg-gray-700 rounded-full h-1.5">
+    <div class="h-1.5 rounded-full transition-all
+      {% if ok %}bg-green-500{% else %}bg-yellow-500{% endif %}"
+      style="width: {{ "%.1f"|format(pct) }}%"></div>
+  </div>
+</div>
+{% endmacro %}
+
+{% if pool_missing %}
+<div class="bg-gray-800/50 rounded-xl p-4 text-xs text-gray-500 text-center">
+  ⏳ DB-ის გარეშე promotion პროგრესი არ ჩანს.
+</div>
+{% elif not rows %}
+<div class="bg-gray-800/50 rounded-xl p-4 text-xs text-gray-500 text-center">
+  სტრატეგიები ჯერ არ რეგისტრირებულა.
+</div>
+{% else %}
+
+<div class="mb-3 bg-blue-950/40 border border-blue-900/50 rounded-lg px-3 py-2 text-xs text-blue-300">
+  ℹ️ <strong>Promotion Pipeline</strong> — ცოცხალი პროგრესი micro-live-მდე.
+  ყოველი სტრატეგია უნდა გაიაროს გეიტი (≥30 დღე, ≥20 ვაჭრობა და სხვა) რეალურ ფულზე გადასვლამდე.
+</div>
+
+{% for r in rows %}
+<div class="bg-gray-800 rounded-xl p-4 mb-3">
+
+  <!-- სტრატეგია + tier -->
+  <div class="flex items-center justify-between mb-3">
+    <span class="text-sm font-bold text-white">
+      {{ strategy_labels.get(r.strategy_id, r.strategy_id) }}
+    </span>
+    <div class="flex items-center gap-2 text-xs">
+      <span class="px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-900 font-semibold">
+        {{ tier_labels.get(r.current_tier, r.current_tier) }}
+      </span>
+      <span class="text-gray-600">→</span>
+      <span class="px-2 py-0.5 rounded-full bg-gray-900 text-gray-400 border border-gray-700">
+        {{ tier_labels.get(r.next_tier, r.next_tier) }}
+      </span>
+    </div>
+  </div>
+
+  {% if r.metrics is none %}
+  <div class="text-xs text-gray-500 italic py-2">
+    {% if r.gate %}
+    მონაცემები ჯერ არ დაგროვდა (საჭიროა ≥5 ვაჭრობა). მონაცემთა შეგროვება მიმდინარეობს...
+    {% else %}
+    უმაღლეს tier-ზეა — შემდგომი გადასვლა არ არსებობს.
+    {% endif %}
+  </div>
+  {% elif r.gate %}
+
+  {% set m = r.metrics %}
+  {% set g = r.gate %}
+  {% set days_ok = m.days_running >= g.min_days %}
+  {% set trades_ok = m.total_trades >= g.min_trades %}
+  {% set sharpe_ok = m.sharpe_ratio >= g.min_sharpe %}
+  {% set dd_ok = m.max_drawdown_pct <= g.max_drawdown_pct %}
+  {% set wr_ok = m.win_rate >= g.min_win_rate %}
+  {% set all_ok = days_ok and trades_ok and sharpe_ok and dd_ok and wr_ok %}
+
+  <div class="space-y-2 mb-3">
+    {{ progress_row('დღეები', m.days_running, g.min_days, days_ok, 'int', ' დღე') }}
+    {{ progress_row('ვაჭრობები', m.total_trades, g.min_trades, trades_ok, 'int') }}
+    {{ progress_row('Sharpe Ratio', m.sharpe_ratio, g.min_sharpe, sharpe_ok, 'float') }}
+    {{ progress_row('Win Rate', m.win_rate, g.min_win_rate, wr_ok, 'pct') }}
+  </div>
+
+  <!-- Max Drawdown (reverse — ნაკლები = კარგი) -->
+  <div class="mb-3">
+    <div class="flex justify-between text-xs mb-0.5">
+      <span class="text-gray-400">Max Drawdown <span class="text-gray-600">(≤ ლიმიტი)</span></span>
+      <span class="font-mono {% if dd_ok %}text-green-400{% else %}text-red-400{% endif %}">
+        {% if dd_ok %}✅{% else %}❌{% endif %}
+        {{ "%.2f"|format(m.max_drawdown_pct * 100) }}%
+        <span class="text-gray-600">/ ≤ {{ "%.0f"|format(g.max_drawdown_pct * 100) }}%</span>
+      </span>
+    </div>
+    {% set dd_pct = (m.max_drawdown_pct / g.max_drawdown_pct * 100) if g.max_drawdown_pct > 0 else 0 %}
+    {% set dd_pct = [dd_pct, 100] | min %}
+    <div class="w-full bg-gray-700 rounded-full h-1.5">
+      <div class="h-1.5 rounded-full transition-all
+        {% if dd_ok %}bg-green-500{% else %}bg-red-500{% endif %}"
+        style="width: {{ "%.1f"|format(dd_pct) }}%"></div>
+    </div>
+  </div>
+
+  <!-- Overall status -->
+  <div class="border-t border-gray-700 pt-2">
+    {% if all_ok %}
+      <p class="text-xs text-green-400 font-semibold">
+        🎯 ყველა გეიტი დაკმაყოფილებულია — ოპერატორის დასტური მზადაა micro-live-ისთვის
+      </p>
+    {% else %}
+      {% set remaining = [] %}
+      {% if not days_ok %}{% set _ = remaining.append('დღეები') %}{% endif %}
+      {% if not trades_ok %}{% set _ = remaining.append('ვაჭრობები') %}{% endif %}
+      {% if not sharpe_ok %}{% set _ = remaining.append('Sharpe') %}{% endif %}
+      {% if not dd_ok %}{% set _ = remaining.append('Drawdown') %}{% endif %}
+      {% if not wr_ok %}{% set _ = remaining.append('Win Rate') %}{% endif %}
+      <p class="text-xs text-yellow-400">
+        ⏳ ჯერ კიდევ აკლია: <span class="font-semibold">{{ remaining | join(' · ') }}</span>
+      </p>
+    {% endif %}
+  </div>
+
+  {% endif %}
+</div>
+{% endfor %}
+
+<p class="text-xs text-gray-600 mt-2">
+  ⚠️ ავტო-promotion არ ხდება — ოპერატორი ადასტურებს ხელით Telegram-დან გეიტის გავლის შემდეგ.
+</p>
+
+{% endif %}

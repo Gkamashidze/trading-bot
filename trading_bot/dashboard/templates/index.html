@@ -241,6 +241,28 @@
     </details>
 
     <!-- ═══════════════════════════════════════════════════════════════
+         EXPANDABLE: 🎯 Promotion პროგრესი — micro-live-მდე გზა
+         ═══════════════════════════════════════════════════════════════ -->
+    <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold text-gray-100">🎯 micro-live-მდე გზა</span>
+          <span class="text-xs text-gray-500 font-normal">— რა გვაკლია რეალურ ფულზე გადასვლამდე</span>
+        </div>
+        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+      </summary>
+      <div
+        class="px-5 pb-5"
+        id="promotion-progress-section"
+        hx-get="/partials/promotion_progress"
+        hx-trigger="load, every 60s"
+        hx-swap="innerHTML"
+      >
+        <div class="py-4 text-gray-600 text-sm animate-pulse">პროგრესი იტვირთება...</div>
+      </div>
+    </details>
+
+    <!-- ═══════════════════════════════════════════════════════════════
          EXPANDABLE: 🌍 ბაზრის გარემო
          ═══════════════════════════════════════════════════════════════ -->
     <details class="bg-gray-900 border border-gray-800 rounded-xl">
