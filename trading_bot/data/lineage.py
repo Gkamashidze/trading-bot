@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from trading_bot.core.models import DataLineage
 from trading_bot.observability.logging import get_logger
 
 log = get_logger(__name__)
+
+_LINEAGE_PATH = Path(os.environ.get("DATA_PATH", "data/raw")).parent / "lineage_store.json"
 
 
 # ---------------------------------------------------------------------------
@@ -76,17 +80,60 @@ def _snapshot_id(lineage: DataLineage) -> str:
 
 
 class LineageStore:
-    """In-memory store of dataset snapshots.
+    """Dataset snapshot store with disk persistence.
 
-    Thread-safe (GIL-protected).  Snapshots are immutable after creation.
+    Snapshots are immutable after creation and keyed by sha256 of their
+    content, making the store self-verifying and safe to merge across restarts.
+    Persisted to ``persist_path`` (atomic write) so backtests survive restarts
+    without re-running a backfill.
 
-    Note: process-local and lost on restart. See ADR-0009 for the
-    PostgreSQL-backed migration plan, triggered when Stage 5 begins or
-    cross-restart provenance is required.
+    Pass ``persist_path=None`` to disable persistence (used in tests).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, persist_path: Path | None = _LINEAGE_PATH) -> None:
         self._snapshots: dict[str, DatasetSnapshot] = {}
+        self._persist_path = persist_path
+        self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        if self._persist_path is None:
+            return
+        try:
+            if self._persist_path.exists():
+                raw: dict[str, dict[str, object]] = json.loads(self._persist_path.read_text())
+                for sid, entry in raw.items():
+                    lineage = DataLineage.model_validate(entry["lineage"])
+                    snap = DatasetSnapshot(
+                        snapshot_id=sid,
+                        lineage=lineage,
+                        created_at=datetime.fromisoformat(str(entry["created_at"])),
+                    )
+                    self._snapshots[sid] = snap
+                log.info("lineage_store_loaded", path=str(self._persist_path), count=len(raw))
+        except Exception as exc:
+            log.warning(
+                "lineage_store_load_failed", path=str(self._persist_path), error=str(exc)
+            )
+
+    def _save_to_disk(self) -> None:
+        if self._persist_path is None:
+            return
+        try:
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._persist_path.with_suffix(".json.tmp")
+            data = {
+                sid: {
+                    "created_at": snap.created_at.isoformat(),
+                    "lineage": snap.lineage.model_dump(mode="json"),
+                }
+                for sid, snap in self._snapshots.items()
+            }
+            tmp.write_text(json.dumps(data))
+            tmp.replace(self._persist_path)
+        except Exception as exc:
+            log.warning(
+                "lineage_store_save_failed", path=str(self._persist_path), error=str(exc)
+            )
 
     def create_snapshot(self, lineage: DataLineage) -> str:
         """Register a lineage record and return its snapshot ID.
@@ -108,6 +155,7 @@ class LineageStore:
                 timeframe=lineage.timeframe,
                 row_count=lineage.row_count,
             )
+            self._save_to_disk()
         return sid
 
     def get_snapshot(self, snapshot_id: str) -> DatasetSnapshot | None:

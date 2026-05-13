@@ -80,7 +80,7 @@ class TestSnapshotId:
 
 class TestLineageStore:
     def setup_method(self) -> None:
-        self.store = LineageStore()
+        self.store = LineageStore(persist_path=None)
 
     def test_create_and_retrieve(self) -> None:
         lin = _lineage()
