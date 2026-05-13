@@ -151,11 +151,18 @@ def create_app() -> FastAPI:
     async def readyz() -> JSONResponse:
         """Railway readiness probe — is the bot ready to serve traffic?
 
-        Returns 200 when DB is connected and scheduler is running.
-        Returns 503 during startup or if a critical dependency is unavailable.
+        Returns 200 when DB is reachable and scheduler is running.
+        Returns 503 during startup, DB outage, or scheduler failure.
         Railway waits for 200 before routing traffic to this instance.
         """
-        db_ok = _pool is not None
+        db_ok = False
+        if _pool is not None:
+            try:
+                async with _pool.acquire() as conn:
+                    await conn.fetchval("SELECT 1", timeout=5.0)
+                db_ok = True
+            except Exception:
+                db_ok = False
         sched_ok = _scheduler is not None and _scheduler.running
         ready = db_ok and sched_ok
         body = {
