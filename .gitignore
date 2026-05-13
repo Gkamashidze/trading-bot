@@ -53,6 +53,8 @@ dmypy.json
 trading_bot/data/raw/
 trading_bot/data/processed/
 *.parquet
+data/last_signal.json
+data/last_signal.json.tmp
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 trading_bot/logs/*.log
