@@ -34,6 +34,11 @@ from trading_bot.backtesting.runner import get_last_backtest_at, get_latest_back
 from trading_bot.observability.logging import get_logger
 from trading_bot.oms.tracker import get_order_tracker
 from trading_bot.portfolio.manager import get_portfolio_manager
+from trading_bot.promotion.pipeline import (
+    PROMOTION_GATES,
+    collect_strategy_metrics,
+    get_all_promotions,
+)
 from trading_bot.strategies.runner import get_last_computed_at, get_latest_signals
 from trading_bot.websocket.price_cache import get_price_cache
 
@@ -43,6 +48,17 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 _ALLOWED_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
+
+_NEXT_TIER = {
+    "shadow": "paper",
+    "paper": "micro_live",
+    "micro_live": "live",
+    "live": "live",
+}
+
+
+def _next_tier_name(current: str) -> str:
+    return _NEXT_TIER.get(current, current)
 
 
 def _allowed_symbols() -> set[str]:
@@ -523,6 +539,38 @@ def create_app() -> FastAPI:
             request=request,
             name="partials/market_context.html",
             context={"ctx": ctx},
+        )
+
+    @app.get("/partials/promotion_progress", response_class=HTMLResponse)
+    async def partial_promotion_progress(request: Request) -> HTMLResponse:
+        """Per-strategy progress toward the next promotion tier."""
+        promotions = get_all_promotions()
+        rows: list[dict[str, Any]] = []
+        for promo in promotions:
+            metrics = None
+            if _pool is not None:
+                try:
+                    metrics = await collect_strategy_metrics(promo.strategy_id, _pool)
+                except Exception as e:
+                    log.warning(
+                        "promotion_metrics_fetch_failed",
+                        strategy=promo.strategy_id,
+                        error=str(e),
+                    )
+            gate = PROMOTION_GATES.get(promo.current_tier)
+            rows.append(
+                {
+                    "strategy_id": promo.strategy_id,
+                    "current_tier": promo.current_tier.value,
+                    "next_tier": _next_tier_name(promo.current_tier.value),
+                    "gate": gate,
+                    "metrics": metrics,
+                }
+            )
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/promotion_progress.html",
+            context={"rows": rows, "pool_missing": _pool is None},
         )
 
     @app.get("/partials/equity_chart", response_class=HTMLResponse)
