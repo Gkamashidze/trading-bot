@@ -158,6 +158,49 @@ async def market_context_refresh_job() -> None:
     )
 
 
+_db_was_reachable: bool = True
+
+
+async def db_health_monitor_job() -> None:
+    """Ping DB every 30s — alert on loss and recovery. Used by Chaos Drill #1."""
+    global _db_was_reachable
+    from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+    from trading_bot.database.connection import get_pool
+
+    try:
+        pool = get_pool()
+    except RuntimeError:
+        return  # pool not yet initialised — skip
+
+    try:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1", timeout=5.0)
+        reachable = True
+    except Exception as exc:
+        reachable = False
+        log.warning("database_unreachable", error=str(exc))
+
+    if not reachable and _db_was_reachable:
+        _db_was_reachable = False
+        alerter = TelegramAlerter.from_env_optional()
+        if alerter:
+            await alerter.send(
+                AlertLevel.WARNING,
+                "database_unreachable",
+                detail="Postgres ping failed — /readyz returning 503. Orders will be rejected.",
+            )
+    elif reachable and not _db_was_reachable:
+        _db_was_reachable = True
+        log.info("database_recovered")
+        alerter = TelegramAlerter.from_env_optional()
+        if alerter:
+            await alerter.send(
+                AlertLevel.SUCCESS,
+                "database_recovered",
+                detail="Postgres ping succeeded — /readyz returning 200. Pool reconnected.",
+            )
+
+
 async def circuit_breaker_monitor_job() -> None:
     """Check drawdown vs circuit breaker thresholds. Runs every 5 minutes."""
     from trading_bot.safety.circuit_breaker import get_circuit_breaker
@@ -353,6 +396,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
             name="Market context refresh (Fear&Greed, Funding Rate, Macro)",
             replace_existing=True,
         )
+
+    scheduler.add_job(
+        db_health_monitor_job,
+        trigger="interval",
+        seconds=30,
+        id="db_health_monitor",
+        name="DB connectivity ping + alert (30s)",
+        replace_existing=True,
+    )
 
     scheduler.add_job(
         circuit_breaker_monitor_job,
