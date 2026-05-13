@@ -15,8 +15,11 @@ Signal-change tracking prevents buying repeatedly while already positioned.
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 from trading_bot.core.models import (
     ExchangeId,
@@ -42,8 +45,35 @@ _MIN_ORDER_VALUE = Decimal("10")  # skip orders worth less than $10
 _risk = RiskEngine()
 _exchange = PaperExchange()
 
-# Last observed signal keyed by "symbol:strategy_id" — detects signal transitions per asset
-_last_signal: dict[str, str] = {}
+# Persist last signal state across restarts — Railway mounts a volume at /data.
+# Derived from DATA_PATH env var so dev and prod use the same code path.
+_LAST_SIGNAL_PATH = Path(os.environ.get("DATA_PATH", "data/raw")).parent / "last_signal.json"
+
+
+def _load_last_signal() -> dict[str, str]:
+    try:
+        if _LAST_SIGNAL_PATH.exists():
+            data: dict[str, str] = json.loads(_LAST_SIGNAL_PATH.read_text())
+            log.info("router_last_signal_loaded", path=str(_LAST_SIGNAL_PATH), keys=len(data))
+            return data
+    except Exception as exc:
+        log.warning("router_last_signal_load_failed", path=str(_LAST_SIGNAL_PATH), error=str(exc))
+    return {}
+
+
+def _save_last_signal() -> None:
+    try:
+        _LAST_SIGNAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _LAST_SIGNAL_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(_last_signal))
+        tmp.replace(_LAST_SIGNAL_PATH)
+    except Exception as exc:
+        log.warning("router_last_signal_save_failed", path=str(_LAST_SIGNAL_PATH), error=str(exc))
+
+
+# Last observed signal keyed by "symbol:strategy_id" — detects signal transitions per asset.
+# Loaded from disk on startup so restarts don't reset prev=HOLD and re-trigger BUY.
+_last_signal: dict[str, str] = _load_last_signal()
 
 
 def _record_reconciliation_rejection(
@@ -125,6 +155,7 @@ async def route_signal(result: StrategyResult) -> None:
     signal_key = f"{result.symbol}:{result.strategy_id}"
     prev = _last_signal.get(signal_key, "HOLD")
     _last_signal[signal_key] = result.signal
+    _save_last_signal()
 
     if result.signal not in ("BUY", "SELL"):
         return

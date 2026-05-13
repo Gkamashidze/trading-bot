@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from trading_bot.core.models import (
@@ -126,6 +128,47 @@ class TestRouterRiskRejection:
         tracker.record.assert_called_once()
         call_args = tracker.record.call_args[0][0]
         assert call_args.status == OrderStatus.REJECTED
+
+
+class TestLastSignalPersistence:
+    def test_load_returns_empty_dict_when_file_missing(self, tmp_path: Path) -> None:
+        from trading_bot.execution import router
+
+        with patch.object(router, "_LAST_SIGNAL_PATH", tmp_path / "last_signal.json"):
+            result = router._load_last_signal()
+        assert result == {}
+
+    def test_save_then_load_roundtrip(self, tmp_path: Path) -> None:
+        from trading_bot.execution import router
+
+        path = tmp_path / "last_signal.json"
+        with patch.object(router, "_LAST_SIGNAL_PATH", path):
+            router._last_signal["BTC/USDT:sma_crossover"] = "BUY"
+            router._save_last_signal()
+            loaded = router._load_last_signal()
+
+        assert loaded == {"BTC/USDT:sma_crossover": "BUY"}
+
+    def test_save_writes_atomically_via_tmp_file(self, tmp_path: Path) -> None:
+        from trading_bot.execution import router
+
+        path = tmp_path / "last_signal.json"
+        with patch.object(router, "_LAST_SIGNAL_PATH", path):
+            router._last_signal["BTC/USDT:sma_crossover"] = "SELL"
+            router._save_last_signal()
+
+        assert path.exists()
+        assert not (tmp_path / "last_signal.json.tmp").exists()
+        assert json.loads(path.read_text())["BTC/USDT:sma_crossover"] == "SELL"
+
+    def test_load_returns_empty_on_corrupt_file(self, tmp_path: Path) -> None:
+        from trading_bot.execution import router
+
+        path = tmp_path / "last_signal.json"
+        path.write_text("not-valid-json{{{{")
+        with patch.object(router, "_LAST_SIGNAL_PATH", path):
+            result = router._load_last_signal()
+        assert result == {}
 
 
 class TestRouterIdempotencyKey:
