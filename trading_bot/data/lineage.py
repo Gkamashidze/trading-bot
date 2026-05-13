@@ -111,9 +111,7 @@ class LineageStore:
                     self._snapshots[sid] = snap
                 log.info("lineage_store_loaded", path=str(self._persist_path), count=len(raw))
         except Exception as exc:
-            log.warning(
-                "lineage_store_load_failed", path=str(self._persist_path), error=str(exc)
-            )
+            log.warning("lineage_store_load_failed", path=str(self._persist_path), error=str(exc))
 
     def _save_to_disk(self) -> None:
         if self._persist_path is None:
@@ -131,9 +129,7 @@ class LineageStore:
             tmp.write_text(json.dumps(data))
             tmp.replace(self._persist_path)
         except Exception as exc:
-            log.warning(
-                "lineage_store_save_failed", path=str(self._persist_path), error=str(exc)
-            )
+            log.warning("lineage_store_save_failed", path=str(self._persist_path), error=str(exc))
 
     def create_snapshot(self, lineage: DataLineage) -> str:
         """Register a lineage record and return its snapshot ID.
