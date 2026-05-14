@@ -229,9 +229,7 @@ class TestPlaceOrder:
         with pytest.raises(ExchangeOrderError):
             await alpaca.place_order(_make_order_request())
 
-    async def test_auth_error_surfaces_as_exchange_auth_error(
-        self, alpaca: AlpacaExchange
-    ) -> None:
+    async def test_auth_error_surfaces_as_exchange_auth_error(self, alpaca: AlpacaExchange) -> None:
         alpaca._trading.get_clock.return_value = _fake_clock(is_open=True)
         alpaca._trading.submit_order.side_effect = RuntimeError("403 forbidden")
 
