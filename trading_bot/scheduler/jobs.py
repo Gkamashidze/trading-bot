@@ -91,13 +91,19 @@ async def backtest_refresh_job() -> None:
     log.info("backtest_refresh_job_complete", strategies=len(results))
 
 
+_INTRADAY_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h"}
+_TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
+
+
 async def daily_ohlcv_ingestion_job(
     exchange_id: str = "binance",
     symbol: str = "BTC/USDT",
     timeframe: str = "1d",
 ) -> None:
-    """Daily job: download yesterday's OHLCV bars and store to Parquet.
+    """OHLCV ingestion job — window adapts to timeframe.
 
+    Intraday (1h etc.): end = last completed candle, start = end - 4 h (gap-fill).
+    Daily: end = midnight, start = end - 2 days.
     Idempotent: safe to run multiple times — deduplication ensures no duplicates.
     Retry: up to 4 attempts with exponential backoff + jitter.
     """
@@ -115,8 +121,15 @@ async def daily_ohlcv_ingestion_job(
     )
 
     now = datetime.now(UTC)
-    end = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=2)  # 2-day window to catch gaps
+    if timeframe in _INTRADAY_TIMEFRAMES:
+        interval_s = _TIMEFRAME_SECONDS[timeframe]
+        ts = int(now.timestamp())
+        end_ts = (ts // interval_s) * interval_s
+        end = datetime.fromtimestamp(end_ts, tz=UTC)
+        start = end - timedelta(hours=4)  # small gap-fill window
+    else:
+        end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = end - timedelta(days=2)  # 2-day window to catch gaps
 
     exchange = get_exchange(ExchangeId(exchange_id))
     downloader = OHLCVDownloader(exchange=exchange)
@@ -347,26 +360,38 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     from trading_bot.config import get_settings
 
     crypto = get_settings().trading.crypto
-    minute_offset = 0
+    daily_minute_offset = 0
     for symbol in crypto.symbols:
         symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
         for timeframe in crypto.timeframes:
-            job_id = f"daily_{symbol_safe}_{timeframe}"
-            scheduler.add_job(
-                daily_ohlcv_ingestion_job,
-                trigger="cron",
-                hour=1,
-                minute=minute_offset,
-                id=job_id,
-                name=f"Daily {symbol} {timeframe} ingestion",
-                replace_existing=True,
-                kwargs={
-                    "exchange_id": crypto.exchange,
-                    "symbol": symbol,
-                    "timeframe": timeframe,
-                },
-            )
-            minute_offset += 15
+            job_id = f"ohlcv_{symbol_safe}_{timeframe}"
+            kwargs = {
+                "exchange_id": crypto.exchange,
+                "symbol": symbol,
+                "timeframe": timeframe,
+            }
+            if timeframe in _INTRADAY_TIMEFRAMES:
+                scheduler.add_job(
+                    daily_ohlcv_ingestion_job,
+                    trigger="interval",
+                    hours=1,
+                    id=job_id,
+                    name=f"Hourly {symbol} {timeframe} ingestion",
+                    replace_existing=True,
+                    kwargs=kwargs,
+                )
+            else:
+                scheduler.add_job(
+                    daily_ohlcv_ingestion_job,
+                    trigger="cron",
+                    hour=1,
+                    minute=daily_minute_offset,
+                    id=job_id,
+                    name=f"Daily {symbol} {timeframe} ingestion",
+                    replace_existing=True,
+                    kwargs=kwargs,
+                )
+                daily_minute_offset += 15
 
     scheduler.add_job(
         signal_refresh_job,
