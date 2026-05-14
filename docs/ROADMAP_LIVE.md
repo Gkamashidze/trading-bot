@@ -367,12 +367,29 @@
 
 ### Gate 0: Paper Readiness (Before Micro-Live)
 
+**Applies to both tracks: BTC/USDT (Binance) and ETFs (Alpaca: SPY/QQQ/SOXX/IBIT)**
+
+**BTC/USDT track:**
 - [ ] Minimum 30 calendar days of paper trading completed
 - [ ] Minimum 100 completed round-trip trades (not just elapsed time)
 - [ ] No single-day paper P&L deviation > 2× expected from backtest
 - [ ] Reconciliation clean: OMS position = paper exchange position for all 30 days
 - [ ] Max paper drawdown within backtest-predicted range (no unexpected behavior)
 - [ ] Paper/backtest parity check: replay same signal period through backtest, compare outputs
+
+**ETF track (SPY/QQQ/SOXX/IBIT via Alpaca paper):**
+- [ ] Alpaca paper credentials configured and health check passing (`trading-bot-etf paper-execution-test`)
+- [ ] Minimum 30 calendar days of Alpaca paper trading completed
+- [ ] Minimum 50 completed round-trip trades across all 4 ETF symbols
+- [ ] `trading-bot-etf test-synthetic` passes for all 4 symbols (≥5 cycles each)
+- [ ] `trading-bot-etf backtest` run for full year — results within expected range
+- [ ] No single-day ETF paper P&L deviation > 2× backtest expectation
+- [ ] Reconciliation clean: OMS ETF positions = Alpaca paper positions for all 30 days
+- [ ] Market hours gate verified: no order attempts outside NYSE 09:30–16:00 ET
+- [ ] NYSE holiday handling verified: no order attempts on market holidays
+- [ ] PDT rule awareness documented (< $25k account: max 3 round-trips per rolling 5 days)
+
+**Shared (both tracks):**
 - [ ] All runbooks written: at minimum those listed in Section 1.9 above
 - [ ] Chaos drill completed: at least one planned failure injection in staging
 - [ ] Post-mortem from chaos drill: action items resolved
@@ -382,6 +399,7 @@
 
 ### Gate 1: Shadow / Live Market Observation (Parallel to Paper)
 
+**BTC/USDT (Binance):**
 - [ ] System connected to real market data WebSocket (not sandbox feed)
 - [ ] All data validation rules running against real tick data
 - [ ] Latency measured: signal-to-order-submission latency under real market conditions
@@ -389,10 +407,18 @@
 - [ ] No order submission — observation only
 - [ ] Duration: minimum 7 days of live market observation before micro-live
 
-### Gate 2: Micro-Live Start
+**ETF (Alpaca):**
+- [ ] Alpaca real-time market data feed active (not paper feed)
+- [ ] Signal generation verified on live ETF data (SMA + RSI signals logged, no orders)
+- [ ] Market hours guard verified in live session: system correctly detects open/close
+- [ ] Duration: minimum 5 trading days of live ETF observation before micro-live
+
+### Gate 2: Micro-Live Start — BTC/USDT (Phase A)
+
+> Start with BTC/USDT. ETF micro-live begins only after Phase A passes.
 
 - [ ] One strategy only (chosen by operator, documented in audit log)
-- [ ] One asset only (BTC/USDT recommended first)
+- [ ] One asset only: BTC/USDT
 - [ ] Max single order: $50 hard limit (enforced in risk engine, not configurable at runtime)
 - [ ] Daily loss cap: configured and tested (triggers automatic halt)
 - [ ] Weekly loss cap: configured and tested
@@ -401,18 +427,48 @@
 - [ ] Automatic rollback to paper: if daily loss cap hit → system switches to paper mode, alerts operator
 - [ ] Duration: minimum 14 calendar days
 
+### Gate 2b: Micro-Live Start — ETF (Phase B, after Gate 2 passes)
+
+> Begin ETF micro-live only after BTC/USDT micro-live (Gate 2) completes successfully.
+
+- [ ] Gate 2 (BTC/USDT) fully passed and documented
+- [ ] Start with SPY only (most liquid, lowest volatility of the four)
+- [ ] Max single ETF order: $100 hard limit (Alpaca commission-free, higher limit acceptable)
+- [ ] Daily ETF loss cap: configured and tested
+- [ ] Market hours guard active: orders blocked outside NYSE hours
+- [ ] PDT rule guard active: round-trip counter tracked per rolling 5-day window
+- [ ] Operator receives alert on every ETF order submission
+- [ ] Duration: minimum 10 trading days on SPY before expanding to QQQ
+- [ ] Expand to QQQ: minimum 5 trading days before adding SOXX
+- [ ] Expand to SOXX: minimum 5 trading days before adding IBIT
+- [ ] IBIT last: highest volatility — minimum 10 trading days standalone before full portfolio
+
 ### Gate 3: Micro-Live → Full Live
 
+**BTC/USDT track:**
 - [ ] 14+ days micro-live completed
 - [ ] Zero unexplained fill discrepancies in micro-live phase
-- [ ] Risk gates triggered correctly in micro-live (if not naturally triggered: tested manually in staging)
+- [ ] Risk gates triggered correctly in micro-live
 - [ ] All micro-live fills compared to paper fills: slippage within modeled range
 - [ ] All micro-live alerts delivered correctly
 - [ ] Operator kill switch exercised at least once during micro-live phase
-- [ ] Runbooks: no gap found during micro-live (all incidents handled by documented procedure)
+- [ ] Runbooks: no gap found during micro-live
 - [ ] Post-mortems from any micro-live incidents: reviewed and closed
+
+**ETF track (all 4 symbols — SPY/QQQ/SOXX/IBIT):**
+- [ ] Gate 2b fully completed for all 4 symbols
+- [ ] Zero unexplained Alpaca fill discrepancies across all ETF symbols
+- [ ] T+1 settlement tracking verified: no over-allocation of unsettled cash
+- [ ] PDT rule: no violation in micro-live phase
+- [ ] Slippage for each ETF within backtest-predicted range
+- [ ] Market hours guard: zero out-of-hours order attempts logged
+- [ ] ETF-specific runbooks written and tested: halt detection, PDT breach, market close handling
+- [ ] Post-mortems from any ETF micro-live incidents: reviewed and closed
+
+**Capital (both tracks):**
 - [ ] Capital increase: start at minimum viable amount (operator decision, documented)
 - [ ] Capital scaling only after full evidence cycle (Section 3.11)
+- [ ] ETF capital allocation: respect `max_capital_pct` per symbol from `asset_universe.yaml`
 
 ### Rollback Triggers (Automatic)
 
