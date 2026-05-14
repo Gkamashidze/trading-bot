@@ -1,5 +1,11 @@
 """Global pytest fixtures and configuration.
 
+CLI option added here:
+  --paper-execution-test   Run Alpaca paper execution tests (requires real API keys).
+                           Without this flag, all tests marked paper_execution are
+                           skipped automatically.
+
+
 Available fixtures:
 - sample_ohlcv_df: a small validated OHLCV DataFrame
 - mock_exchange: an AsyncMock of ExchangeInterface
@@ -93,3 +99,35 @@ def mock_audit_log() -> AsyncMock:
     mock.get_chain_head.return_value = None
     mock.verify_chain.return_value = True
     return mock
+
+
+# ---------------------------------------------------------------------------
+# Alpaca paper-execution test flag
+# ---------------------------------------------------------------------------
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--paper-execution-test",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable Alpaca paper execution tests. "
+            "Requires ALPACA_API_KEY and ALPACA_SECRET_KEY env vars. "
+            "Never enable in automated CI pipelines."
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if config.getoption("--paper-execution-test"):
+        return  # flag present — run paper_execution tests normally
+    skip_paper = pytest.mark.skip(
+        reason=(
+            "Alpaca paper execution tests are disabled by default. "
+            "Pass --paper-execution-test to enable (requires API keys)."
+        )
+    )
+    for item in items:
+        if "paper_execution" in item.keywords:
+            item.add_marker(skip_paper)

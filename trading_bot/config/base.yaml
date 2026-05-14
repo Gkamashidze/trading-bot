@@ -91,6 +91,44 @@ exchange:
 
   alpaca:
     base_url: "https://paper-api.alpaca.markets"
+    paper: true                              # always paper by default — live needs ALLOW_LIVE_TRADING=true
+    allow_live_trading: false
+    allowed_etf_symbols:
+      - "SPY"
+      - "QQQ"
+      - "SOXX"
+      - "IBIT"
+    timeout_seconds: 30
+    retry_attempts: 4
+    # ── Per-symbol strategy parameter overrides ──────────────────────────────
+    # Different ETFs warrant different SMA windows and RSI thresholds because
+    # their volatility profiles differ significantly.
+    # Promotion pipeline uses these params — changing them resets paper evidence.
+    etf_strategy_params:
+      SPY:
+        sma_fast: 20
+        sma_slow: 50
+        rsi_period: 14
+        rsi_oversold: 32.0    # slightly tighter — SPY rarely hits extreme RSI
+        rsi_overbought: 68.0
+      QQQ:
+        sma_fast: 15
+        sma_slow: 40
+        rsi_period: 14
+        rsi_oversold: 30.0
+        rsi_overbought: 70.0
+      SOXX:
+        sma_fast: 10
+        sma_slow: 30
+        rsi_period: 14
+        rsi_oversold: 28.0    # wider zone for semiconductor sector volatility
+        rsi_overbought: 72.0
+      IBIT:
+        sma_fast: 10
+        sma_slow: 25
+        rsi_period: 14
+        rsi_oversold: 25.0    # BTC-linked; extreme oversold common
+        rsi_overbought: 75.0
 
 latency_budgets_ms:
   data_ingestion: 50
@@ -136,3 +174,4 @@ trading:
       - "SPY"
       - "QQQ"
       - "SOXX"
+      - "IBIT"   # Bitcoin spot ETF — trades on US equity hours via Alpaca

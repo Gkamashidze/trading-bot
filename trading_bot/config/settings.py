@@ -137,6 +137,44 @@ class BinanceExchangeSettings(BaseSettings):
     retry_backoff_base: int = 2
 
 
+class EtfStrategyParams(BaseSettings):
+    """Per-ETF strategy parameter overrides.
+
+    Allows different SMA/RSI parameters per symbol because ETF volatility
+    profiles differ significantly (SPY ≈ low vol; IBIT ≈ BTC-linked high vol).
+    """
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    sma_fast: int = 20
+    sma_slow: int = 50
+    rsi_period: int = 14
+    rsi_oversold: float = 30.0
+    rsi_overbought: float = 70.0
+
+
+class AlpacaExchangeSettings(BaseSettings):
+    """Alpaca broker configuration.
+
+    Default mode is always paper trading at https://paper-api.alpaca.markets.
+    Live trading requires BOTH:
+      - paper=false in config  AND
+      - ALLOW_LIVE_TRADING=true environment variable
+    """
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    api_key: str = Field(default="", alias="ALPACA_API_KEY")
+    secret_key: str = Field(default="", alias="ALPACA_SECRET_KEY")
+    base_url: str = "https://paper-api.alpaca.markets"
+    paper: bool = True
+    allow_live_trading: bool = Field(default=False, alias="ALLOW_LIVE_TRADING")
+    allowed_etf_symbols: list[str] = Field(default_factory=lambda: ["SPY", "QQQ", "SOXX", "IBIT"])
+    timeout_seconds: int = 30
+    retry_attempts: int = 4
+    etf_strategy_params: dict[str, EtfStrategyParams] = Field(default_factory=dict)
+
+
 class TelegramSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -241,6 +279,7 @@ class Settings(BaseSettings):
     time_sync: TimeSyncSettings = Field(default_factory=TimeSyncSettings)
     latency_budgets: LatencyBudgetsSettings = Field(default_factory=LatencyBudgetsSettings)
     binance: BinanceExchangeSettings = Field(default_factory=BinanceExchangeSettings)
+    alpaca: AlpacaExchangeSettings = Field(default_factory=AlpacaExchangeSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     storage: DataStorageSettings = Field(default_factory=DataStorageSettings)
     trading: TradingSettings = Field(default_factory=TradingSettings)
@@ -329,6 +368,9 @@ def _load_settings() -> Settings:
 
     if "exchange" in yaml_defaults and "binance" in yaml_defaults["exchange"]:
         nested_overrides["binance"] = yaml_defaults["exchange"]["binance"]
+
+    if "exchange" in yaml_defaults and "alpaca" in yaml_defaults["exchange"]:
+        nested_overrides["alpaca"] = yaml_defaults["exchange"]["alpaca"]
 
     # Build nested sub-settings from YAML first, then env vars will override
     return Settings(**nested_overrides)
