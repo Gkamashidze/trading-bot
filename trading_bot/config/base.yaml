@@ -128,8 +128,8 @@ trading:
       - "BTC/USDT"
       - "ETH/USDT"
     timeframes:
-      - "1d"
       - "1h"
+      - "1d"
   equity:
     exchange: "alpaca"
     symbols:
