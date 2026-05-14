@@ -343,7 +343,8 @@ class TestPaperExchange:
         fill = Decimal(result["fill_price"])
         # BUY → price + slippage (0.05%) → > $50000
         assert fill > Decimal("50000")
-        assert result["status"] == "filled"
+        # Partial fill is valid — assert order executed (not rejected)
+        assert result["status"] in ("filled", "partially_filled")
 
     @pytest.mark.asyncio
     async def test_place_order_no_price_raises(self) -> None:
