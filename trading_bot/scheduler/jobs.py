@@ -378,6 +378,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                     id=job_id,
                     name=f"Hourly {symbol} {timeframe} ingestion",
                     replace_existing=True,
+                    next_run_time=datetime.now(UTC),  # fire immediately on startup
                     kwargs=kwargs,
                 )
             else:
