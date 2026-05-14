@@ -95,6 +95,17 @@ _INTRADAY_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h"}
 _TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
 
 
+def _has_existing_data(exchange_id: str, symbol: str, timeframe: str) -> bool:
+    """Return True if any Parquet file exists for this (exchange, symbol, timeframe)."""
+    from pathlib import Path
+
+    from trading_bot.config import get_settings
+
+    symbol_safe = symbol.replace("/", "_").replace(":", "_")
+    parquet_dir = Path(get_settings().storage.raw_path) / exchange_id / symbol_safe / timeframe
+    return parquet_dir.exists() and any(parquet_dir.glob("*.parquet"))
+
+
 async def daily_ohlcv_ingestion_job(
     exchange_id: str = "binance",
     symbol: str = "BTC/USDT",
@@ -102,10 +113,12 @@ async def daily_ohlcv_ingestion_job(
 ) -> None:
     """OHLCV ingestion job — window adapts to timeframe.
 
-    Intraday (1h etc.): end = last completed candle, start = end - 4 h (gap-fill).
+    Intraday (1h etc.):
+      - Bootstrap (no existing data): 30 days of history so strategies have enough bars.
+      - Gap-fill (data exists): end - 4 h window.
     Daily: end = midnight, start = end - 2 days.
-    Idempotent: safe to run multiple times — deduplication ensures no duplicates.
-    Retry: up to 4 attempts with exponential backoff + jitter.
+    Idempotent: deduplication ensures no duplicates.
+    Failures are alerted to Telegram so silent data outages are visible.
     """
     from datetime import timedelta
 
@@ -114,7 +127,7 @@ async def daily_ohlcv_ingestion_job(
     from trading_bot.exchange import get_exchange
 
     log.info(
-        "daily_ingestion_started",
+        "ohlcv_ingestion_started",
         exchange=exchange_id,
         symbol=symbol,
         timeframe=timeframe,
@@ -126,31 +139,72 @@ async def daily_ohlcv_ingestion_job(
         ts = int(now.timestamp())
         end_ts = (ts // interval_s) * interval_s
         end = datetime.fromtimestamp(end_ts, tz=UTC)
-        start = end - timedelta(hours=4)  # small gap-fill window
+        # Bootstrap: download 30 days on first run so strategies have enough bars.
+        # Gap-fill: 4-hour window on subsequent runs (resume logic fills exact gap).
+        bootstrap = not _has_existing_data(exchange_id, symbol, timeframe)
+        start = end - timedelta(days=30 if bootstrap else 4)
     else:
         end = now.replace(hour=0, minute=0, second=0, microsecond=0)
         start = end - timedelta(days=2)  # 2-day window to catch gaps
+        bootstrap = False
 
     exchange = get_exchange(ExchangeId(exchange_id))
     downloader = OHLCVDownloader(exchange=exchange)
 
-    bars = await downloader.download(
-        exchange_id=ExchangeId(exchange_id),
-        symbol=symbol,
-        timeframe=timeframe,
-        start=start,
-        end=end,
-    )
-
-    await exchange.close()  # type: ignore[attr-defined]
+    try:
+        bars = await downloader.download(
+            exchange_id=ExchangeId(exchange_id),
+            symbol=symbol,
+            timeframe=timeframe,
+            start=start,
+            end=end,
+        )
+    except Exception as e:
+        log.error(
+            "ohlcv_ingestion_failed",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            error=str(e),
+        )
+        _send_ingestion_alert(symbol, timeframe, str(e))
+        raise
+    finally:
+        await exchange.close()  # type: ignore[attr-defined]
 
     log.info(
-        "daily_ingestion_complete",
+        "ohlcv_ingestion_complete",
         exchange=exchange_id,
         symbol=symbol,
         timeframe=timeframe,
         bars_stored=bars,
+        bootstrap=bootstrap,
     )
+
+
+def _send_ingestion_alert(symbol: str, timeframe: str, detail: str) -> None:
+    """Fire a Telegram alert when OHLCV ingestion fails (non-blocking, best-effort)."""
+    import asyncio
+
+    from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+    alerter = TelegramAlerter.from_env_optional()
+    if alerter is None:
+        return
+
+    async def _send() -> None:
+        await alerter.send(
+            AlertLevel.ERROR,
+            f"Ingestion failed: {symbol} [{timeframe}]",
+            detail=detail[:400],
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(_send())  # noqa: RUF006
+    except Exception:  # noqa: S110
+        pass
 
 
 async def market_context_refresh_job() -> None:
