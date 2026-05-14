@@ -362,3 +362,33 @@ assets:
       Tracks physical gold — no yield. Negative real-rate sensitive.
       Storage and custody costs embedded in expense ratio (0.40 % p.a.).
     experimental: false
+
+  - symbol: "IBIT"
+    venue: "alpaca"
+    asset_class: "etf"
+    status: "disabled"
+    phase: 5
+    max_capital_pct: 0.10             # hard-capped — overlaps BTC/USDT exposure
+    max_order_notional_usd: 4000
+    min_24h_volume_usd: 500000000     # $500 M+ — consistently top-10 ETF by volume
+    max_spread_bps: 2.0
+    required_history_days: 180        # launched Jan 2024; 365 days not yet feasible at Stage 5
+    paper_min_days: 30
+    paper_min_trades: 20
+    enabled_strategies:
+      - "sma_crossover"
+    feature_flag: "asset_group_etf_phase5_enabled"
+    rationale: >
+      iShares Bitcoin Trust ETF ($50 B+ AUM, launched Jan 2024). Provides
+      BTC spot exposure through the traditional brokerage stack (Alpaca)
+      without crypto exchange custody risk. Useful for cross-venue BTC
+      signal confirmation and for accounts restricted to equities-only venues.
+      One of the highest-volume ETFs launched in recent history.
+    risks: >
+      BTC/USDT correlation ≈ 0.95 — virtually no price diversification vs
+      the direct crypto position; adds venue diversification only. Combined
+      BTC + IBIT notional must be tracked to avoid double-sizing Bitcoin.
+      Market-hours only (09:30–16:00 ET); gap risk vs 24/7 BTC spot.
+      Short history (Jan 2024): limited bear-cycle data.
+      Hard cap 10 % to control aggregate BTC concentration.
+    experimental: false

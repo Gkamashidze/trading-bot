@@ -339,10 +339,22 @@ class TestProductionRegistry:
 
     def test_expected_etf_symbols_present(self) -> None:
         reg = get_asset_registry()
-        expected = {"SPY", "QQQ", "SOXX", "IWM", "TLT", "GLD"}
+        expected = {"SPY", "QQQ", "SOXX", "IWM", "TLT", "GLD", "IBIT"}
         registered = {a.symbol for a in reg.assets}
         missing = expected - registered
         assert missing == set(), f"Expected ETF symbols missing: {missing}"
+
+    def test_ibit_cap_at_most_15_pct(self) -> None:
+        """IBIT hard-capped at 10% due to BTC/USDT overlap concentration risk."""
+        reg = get_asset_registry()
+        ibit = reg.get("IBIT")
+        assert ibit is not None, "IBIT missing from registry"
+        assert ibit.max_capital_pct <= 0.15, (
+            f"IBIT cap {ibit.max_capital_pct:.0%} exceeds 15% BTC-overlap ceiling"
+        )
+        assert ibit.venue == ExchangeId.ALPACA
+        assert ibit.asset_class == AssetClass.ETF
+        assert ibit.status == AssetStatus.DISABLED
 
     def test_expected_crypto_symbols_present(self) -> None:
         reg = get_asset_registry()
