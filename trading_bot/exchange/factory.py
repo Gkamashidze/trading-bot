@@ -37,8 +37,7 @@ def get_exchange(exchange_id: ExchangeId | str) -> ExchangeInterface:
             secret_key=settings.alpaca.secret_key,
             paper=settings.alpaca.paper,
             allowed_symbols=frozenset(settings.alpaca.allowed_etf_symbols),
-            timeout_seconds=settings.alpaca.timeout_seconds,
-            retry_attempts=settings.alpaca.retry_attempts,
+            trading_base_url=settings.alpaca.base_url,
             allow_live_trading=settings.alpaca.allow_live_trading,
         )
 

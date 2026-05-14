@@ -86,8 +86,7 @@ class AlpacaExchange(ExchangeInterface):
         secret_key: str = "",
         paper: bool = True,
         allowed_symbols: frozenset[str] = _DEFAULT_ALLOWED_SYMBOLS,
-        timeout_seconds: int = 30,
-        retry_attempts: int = 4,
+        trading_base_url: str = _PAPER_BASE_URL,
         allow_live_trading: bool = False,
     ) -> None:
         """Initialise the Alpaca adapter.
@@ -98,8 +97,10 @@ class AlpacaExchange(ExchangeInterface):
             paper: True → paper endpoint (default, safe). False → live.
             allowed_symbols: ETF/equity symbols that may be ordered.
                 Orders for symbols not in this set are rejected immediately.
-            timeout_seconds: HTTP timeout for Alpaca API calls.
-            retry_attempts: Number of retry attempts on transient failures.
+            trading_base_url: Override for the Alpaca trading API base URL.
+                Passed as url_override to TradingClient. Defaults to the paper
+                endpoint. The data API (StockHistoricalDataClient) always uses
+                its own default endpoint (data.alpaca.markets) — separate URLs.
             allow_live_trading: Must be True (ALLOW_LIVE_TRADING=true) when
                 paper=False. Raises KillSwitchError otherwise.
         """
@@ -112,14 +113,14 @@ class AlpacaExchange(ExchangeInterface):
 
         self._paper = paper
         self._allowed_symbols = frozenset(s.upper() for s in allowed_symbols)
-        self._timeout = timeout_seconds
-        self._retry_attempts = retry_attempts
 
         self._trading = TradingClient(
             api_key=api_key or None,
             secret_key=secret_key or None,
             paper=paper,
+            url_override=trading_base_url,
         )
+        # Data API uses its own endpoint (data.alpaca.markets) — not the trading URL.
         self._data_client = StockHistoricalDataClient(
             api_key=api_key or None,
             secret_key=secret_key or None,
@@ -195,7 +196,7 @@ class AlpacaExchange(ExchangeInterface):
             try:
                 request = StockBarsRequest(**request_params)
                 response = await self._run_sync(self._data_client.get_stock_bars, request)
-                raw_bars = list(response.get(symbol.upper(), []))
+                raw_bars = list(response.data.get(symbol.upper(), []))
             except Exception as exc:
                 _raise_alpaca_error(exc, context=f"fetch_ohlcv({symbol})")
 
