@@ -153,6 +153,18 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
+         ROW 4: Alpaca Paper Account — real broker data
+         ═══════════════════════════════════════════════════════════════ -->
+    <section
+      id="alpaca-account-section"
+      hx-get="/partials/alpaca_account"
+      hx-trigger="load, every 60s"
+      hx-swap="innerHTML"
+    >
+      <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 animate-pulse"></div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════
          EXPANDABLE: 📈 Equity Curve — კაპიტალის ცვლილება დროთა განმავლობაში
          ═══════════════════════════════════════════════════════════════ -->
     <details class="bg-gray-900 border border-gray-800 rounded-xl" open>

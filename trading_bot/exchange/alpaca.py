@@ -347,6 +347,44 @@ class AlpacaExchange(ExchangeInterface):
             "portfolio_value": Decimal(str(account.portfolio_value)),
         }
 
+    async def fetch_account(self) -> dict[str, Any]:
+        """Return full account snapshot: equity, cash, buying_power, P&L, day_trade_count."""
+        try:
+            account = await self._run_sync(self._trading.get_account)
+        except Exception as exc:
+            _raise_alpaca_error(exc, context="fetch_account")
+        return {
+            "equity": str(account.equity),
+            "cash": str(account.cash),
+            "portfolio_value": str(account.portfolio_value),
+            "buying_power": str(account.buying_power),
+            "last_equity": str(account.last_equity),
+            "status": getattr(account.status, "value", str(account.status)),
+            "paper": self._paper,
+        }
+
+    async def fetch_positions(self) -> list[dict[str, Any]]:
+        """Return all open positions from Alpaca account."""
+        try:
+            positions = await self._run_sync(self._trading.get_all_positions)
+        except Exception as exc:
+            _raise_alpaca_error(exc, context="fetch_positions")
+        result: list[dict[str, Any]] = []
+        for p in positions:
+            result.append(
+                {
+                    "symbol": p.symbol,
+                    "qty": str(p.qty),
+                    "avg_entry_price": str(p.avg_entry_price),
+                    "current_price": str(p.current_price),
+                    "market_value": str(p.market_value),
+                    "unrealized_pl": str(p.unrealized_pl),
+                    "unrealized_plpc": str(p.unrealized_plpc),
+                    "side": getattr(p.side, "value", str(p.side)),
+                }
+            )
+        return result
+
     async def get_server_time(self) -> datetime:
         """Return current Alpaca server time as UTC-aware datetime."""
         try:

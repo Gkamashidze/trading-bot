@@ -1,0 +1,162 @@
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-full">
+
+  <!-- სათაური -->
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-sm font-semibold text-gray-100">📈 Alpaca Paper Account</h2>
+    <span class="text-xs bg-blue-950 text-blue-300 border border-blue-900 px-2 py-0.5 rounded-full font-semibold">Paper API</span>
+  </div>
+
+  {% if error %}
+    <div class="bg-red-950/40 border border-red-900 rounded-lg px-4 py-3 text-sm text-red-400">
+      ⚠️ {{ error }}
+    </div>
+
+  {% else %}
+
+  {% set equity    = account.equity | float %}
+  {% set cash      = account.cash | float %}
+  {% set last_eq   = account.last_equity | float %}
+  {% set buy_pwr   = account.buying_power | float %}
+  {% set dpnl      = daily_pnl | float %}
+  {% set dpnl_pct  = (dpnl / last_eq * 100) if last_eq != 0 else 0 %}
+
+  <!-- ძირითადი მეტრიკები -->
+  <div class="grid grid-cols-2 gap-3 mb-4">
+
+    <!-- სულ კაპიტალი -->
+    <div class="bg-gray-800 rounded-xl p-4 col-span-2">
+      <p class="tip text-xs text-gray-500 mb-1"
+         data-tip="Alpaca paper account-ის სულ კაპიტალი (Equity = Cash + ღია პოზიციები). ეს არის Alpaca-ს API-დან პირდაპირ.">
+        სულ კაპიტალი (Equity) <span class="text-gray-600 text-xs ml-1">❓</span>
+      </p>
+      <p class="text-3xl font-bold text-white font-mono tracking-tight">
+        ${{ "%.2f"|format(equity) }}
+      </p>
+    </div>
+
+    <!-- დღიური P&L -->
+    <div class="bg-gray-800 rounded-xl p-4">
+      <p class="tip text-xs text-gray-500 mb-1"
+         data-tip="Daily P&L = დღეს მოგება/ზარალი. Equity - Last Equity (გუშინდელი დახურვის ღირებულება).">
+        დღეს (Daily P&L) <span class="text-gray-600 text-xs ml-1">❓</span>
+      </p>
+      <p class="text-xl font-bold font-mono {% if dpnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+        {{ "%+.2f"|format(dpnl) }}$
+      </p>
+      <p class="text-xs font-mono {% if dpnl_pct >= 0 %}text-green-600{% else %}text-red-600{% endif %} mt-0.5">
+        {{ "%+.2f"|format(dpnl_pct) }}%
+      </p>
+    </div>
+
+    <!-- Buying Power -->
+    <div class="bg-gray-800 rounded-xl p-4">
+      <p class="tip text-xs text-gray-500 mb-1"
+         data-tip="Buying Power — ახალი ყიდვისთვის ხელმისაწვდომი კაპიტალი (Cash × Margin, ETF-ებისთვის ჩვეულებრივ 2×).">
+        Buying Power <span class="text-gray-600 text-xs ml-1">❓</span>
+      </p>
+      <p class="text-xl font-bold font-mono text-blue-300">
+        ${{ "%.2f"|format(buy_pwr) }}
+      </p>
+    </div>
+
+  </div>
+
+  <!-- ღია პოზიციები -->
+  <div class="mb-4">
+    <div class="flex items-center justify-between mb-2">
+      <span class="tip text-xs font-semibold text-gray-500 uppercase tracking-wider"
+            data-tip="Alpaca-ს paper account-ში ღია ETF პოზიციები. Unrealized PnL — ჯერ გაუყიდავი მოგება/ზარალი.">
+        ღია პოზიციები <span class="text-gray-600 text-xs ml-1">❓</span>
+      </span>
+      <span class="text-xs text-gray-600">{{ positions | length }} ცალი</span>
+    </div>
+
+    {% if positions %}
+      <div class="overflow-x-auto rounded-lg border border-gray-800">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-800/70">
+            <tr class="text-gray-500">
+              <th class="text-left px-3 py-2">სიმბოლო</th>
+              <th class="text-right px-3 py-2">რაოდ.</th>
+              <th class="text-right px-3 py-2">შეყვ. ფასი</th>
+              <th class="text-right px-3 py-2">მიმდ. ფასი</th>
+              <th class="text-right px-3 py-2">ღირებ.</th>
+              <th class="text-right px-3 py-2 tip" data-tip="Unrealized PnL — ჯერ გაუყიდავი პოზიციის მოგება/ზარალი.">
+                განუხ. PnL ❓
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pos in positions %}
+              {% set pnl     = pos.unrealized_pl | float %}
+              {% set pnl_pct = pos.unrealized_plpc | float * 100 %}
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td class="px-3 py-2.5 font-bold text-white">{{ pos.symbol }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-400">{{ pos.qty }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-400">${{ "%.2f"|format(pos.avg_entry_price | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-300">${{ "%.2f"|format(pos.current_price | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono text-gray-300">${{ "%.2f"|format(pos.market_value | float) }}</td>
+                <td class="px-3 py-2.5 text-right font-mono font-semibold {% if pnl >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                  {{ "%+.2f"|format(pnl) }}$
+                  <span class="text-xs {% if pnl_pct >= 0 %}text-green-700{% else %}text-red-700{% endif %}">
+                    ({{ "%+.1f"|format(pnl_pct) }}%)
+                  </span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-gray-800/40 rounded-lg px-4 py-3 text-sm text-gray-600 italic">
+        ამჟამად ღია პოზიციები არ არის — ბოტი ელოდება სიგნალს ან ბაზრის გახსნას.
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- ღია ორდერები -->
+  <div>
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ღია ორდერები</span>
+      <span class="text-xs text-gray-600">{{ open_orders | length }} ცალი</span>
+    </div>
+
+    {% if open_orders %}
+      <div class="overflow-x-auto rounded-lg border border-gray-800">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-800/70">
+            <tr class="text-gray-500">
+              <th class="text-left px-3 py-2">სიმბ.</th>
+              <th class="text-left px-3 py-2">ოპ.</th>
+              <th class="text-right px-3 py-2">რაოდ.</th>
+              <th class="text-left px-3 py-2">სტატ.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for order in open_orders %}
+              <tr class="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td class="px-3 py-2 font-bold text-white">{{ order.symbol }}</td>
+                <td class="px-3 py-2">
+                  {% if order.side == "buy" %}
+                    <span class="bg-green-950 text-green-300 border border-green-900 px-2 py-0.5 rounded text-xs font-bold">▲ ყიდვა</span>
+                  {% else %}
+                    <span class="bg-red-950 text-red-300 border border-red-900 px-2 py-0.5 rounded text-xs font-bold">▼ გაყიდ.</span>
+                  {% endif %}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-gray-400">{{ order.qty }}</td>
+                <td class="px-3 py-2 text-gray-500 font-mono text-xs">{{ order.status }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="bg-gray-800/40 rounded-lg px-4 py-3 text-sm text-gray-600 italic">
+        ღია ორდერები არ არის.
+      </div>
+    {% endif %}
+  </div>
+
+  {% endif %}
+
+</div>

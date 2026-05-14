@@ -512,6 +512,66 @@ def create_app() -> FastAPI:
             context={"snapshot": snapshot, "recent_orders": recent_orders},
         )
 
+    @app.get("/partials/alpaca_account", response_class=HTMLResponse)
+    async def partial_alpaca_account(request: Request) -> HTMLResponse:
+        """Real-time Alpaca paper account: balance, positions, open orders."""
+        from trading_bot.config import get_settings
+        from trading_bot.core.models import ExchangeId
+        from trading_bot.exchange import get_exchange
+
+        settings = get_settings()
+        has_keys = bool(settings.alpaca.api_key and settings.alpaca.secret_key)
+        if not has_keys:
+            return templates.TemplateResponse(
+                request=request,
+                name="partials/alpaca_account.html",
+                context={"error": "ALPACA_API_KEY / ALPACA_SECRET_KEY არ არის კონფიგურირებული."},
+            )
+
+        try:
+            exchange = get_exchange(ExchangeId.ALPACA)
+            account, positions, open_orders = await asyncio.gather(
+                exchange.fetch_account(),  # type: ignore[attr-defined]
+                exchange.fetch_positions(),  # type: ignore[attr-defined]
+                exchange.fetch_open_orders(),
+                return_exceptions=True,
+            )
+        except Exception as exc:
+            log.warning("alpaca_account_partial_failed", error=str(exc))
+            return templates.TemplateResponse(
+                request=request,
+                name="partials/alpaca_account.html",
+                context={"error": f"Alpaca API error: {exc}"},
+            )
+
+        # Gather may return exceptions per-task — unpack safely
+        def _ok(val: Any) -> Any:
+            return val if not isinstance(val, Exception) else None
+
+        account_data = _ok(account) or {}
+        positions_data = _ok(positions) or []
+        orders_data = _ok(open_orders) or []
+
+        # Daily P&L = equity - last_equity
+        try:
+            daily_pnl = float(account_data.get("equity", 0)) - float(
+                account_data.get("last_equity", 0)
+            )
+        except (TypeError, ValueError):
+            daily_pnl = 0.0
+
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/alpaca_account.html",
+            context={
+                "account": account_data,
+                "positions": positions_data,
+                "open_orders": orders_data,
+                "daily_pnl": daily_pnl,
+                "error": None,
+            },
+        )
+
     @app.get("/partials/safety", response_class=HTMLResponse)
     async def partial_safety(request: Request) -> HTMLResponse:
         from trading_bot.config import get_settings
