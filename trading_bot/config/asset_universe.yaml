@@ -220,16 +220,24 @@ assets:
     experimental: true
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 5 — ETF basket (requires Alpaca integration; all disabled until
-  # Stage 5 execution engine is wired for Alpaca paper API)
-  # Note: market hours (09:30–16:00 ET), trading calendar, and fractional
-  # shares logic all differ from crypto — activate as a coordinated group.
+  # PHASE 5 — ETF basket via Alpaca
+  #
+  # Wave 1 (approved): SPY, QQQ, SOXX, IBIT
+  #   flag: asset_group_etf_wave1_enabled (default: true)
+  #   status: research — data ingestion active; promote to paper after 30+ days
+  #
+  # Future wave (not yet approved): IWM, TLT, GLD
+  #   flag: asset_group_etf_phase5_enabled (default: false)
+  #   status: disabled — activate only after Wave 1 paper gates pass
+  #
+  # Notes: market hours (09:30–16:00 ET), NYSE trading calendar.
+  # live_trading_enabled = false at the bot level regardless of status here.
   # ═══════════════════════════════════════════════════════════════════════════
 
   - symbol: "SPY"
     venue: "alpaca"
     asset_class: "etf"
-    status: "disabled"
+    status: "research"
     phase: 5
     max_capital_pct: 0.30
     max_order_notional_usd: 15000
@@ -240,7 +248,7 @@ assets:
     paper_min_trades: 20
     enabled_strategies:
       - "sma_crossover"
-    feature_flag: "asset_group_etf_phase5_enabled"
+    feature_flag: "asset_group_etf_wave1_enabled"
     rationale: >
       S&P 500 tracker. Most liquid ETF globally ($200 B+ AUM).
       Portfolio anchor for equity exposure. yfinance data available since 1993.
@@ -252,7 +260,7 @@ assets:
   - symbol: "QQQ"
     venue: "alpaca"
     asset_class: "etf"
-    status: "disabled"
+    status: "research"
     phase: 5
     max_capital_pct: 0.25
     max_order_notional_usd: 12000
@@ -263,7 +271,7 @@ assets:
     paper_min_trades: 20
     enabled_strategies:
       - "sma_crossover"
-    feature_flag: "asset_group_etf_phase5_enabled"
+    feature_flag: "asset_group_etf_wave1_enabled"
     rationale: >
       Nasdaq-100 tracker. Tech-heavy ($200 B+ AUM). Positive correlation
       with ETH/growth assets; useful for cross-asset signal confirmation.
@@ -274,7 +282,7 @@ assets:
   - symbol: "SOXX"
     venue: "alpaca"
     asset_class: "etf"
-    status: "disabled"
+    status: "research"
     phase: 5
     max_capital_pct: 0.15
     max_order_notional_usd: 5000
@@ -285,7 +293,7 @@ assets:
     paper_min_trades: 20
     enabled_strategies:
       - "sma_crossover"
-    feature_flag: "asset_group_etf_phase5_enabled"
+    feature_flag: "asset_group_etf_wave1_enabled"
     rationale: >
       Semiconductor sector ETF ($10 B+ AUM). Exposure to AI/chip cycle
       distinct from broad market. Useful thematic signal.
@@ -366,7 +374,7 @@ assets:
   - symbol: "IBIT"
     venue: "alpaca"
     asset_class: "etf"
-    status: "disabled"
+    status: "research"
     phase: 5
     max_capital_pct: 0.10             # hard-capped — overlaps BTC/USDT exposure
     max_order_notional_usd: 4000
@@ -377,7 +385,7 @@ assets:
     paper_min_trades: 20
     enabled_strategies:
       - "sma_crossover"
-    feature_flag: "asset_group_etf_phase5_enabled"
+    feature_flag: "asset_group_etf_wave1_enabled"
     rationale: >
       iShares Bitcoin Trust ETF ($50 B+ AUM, launched Jan 2024). Provides
       BTC spot exposure through the traditional brokerage stack (Alpaca)

@@ -90,9 +90,15 @@ flags:
     owner: "quant"
     critical: false
 
+  asset_group_etf_wave1_enabled:
+    default: true
+    description: "Wave 1 ETF: SPY/QQQ/SOXX/IBIT via Alpaca paper API (approved; Stage 5 integration complete)"
+    owner: "quant"
+    critical: false
+
   asset_group_etf_phase5_enabled:
     default: false
-    description: "Phase 5 ETF basket: SPY/QQQ/SOXX/IWM/TLT/GLD via Alpaca (requires Stage 5 integration)"
+    description: "Phase 5 ETF remainder: IWM/TLT/GLD via Alpaca (future wave — not yet approved)"
     owner: "quant"
     critical: false
 
