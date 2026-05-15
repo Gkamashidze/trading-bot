@@ -87,7 +87,14 @@ def upgrade() -> None:
             ('prometheus_enabled',      TRUE,  'system', 'Initial safe default'),
             ('strategy_sma_enabled',    FALSE, 'system', 'SMA crossover strategy signal generation (Stage 3+)'),
             ('strategy_rsi_enabled',    FALSE, 'system', 'RSI mean-reversion strategy signal generation (Stage 3+)'),
-            ('canary_trade_enabled',    FALSE, 'system', 'Synthetic canary trades at market open (Stage 5+)')
+            ('canary_trade_enabled',    FALSE, 'system', 'Synthetic canary trades at market open (Stage 5+)'),
+            ('asset_group_crypto_phase1_enabled', TRUE,  'system', 'Phase 1 crypto: BTC/USDT + ETH/USDT'),
+            ('asset_group_crypto_phase2_enabled', FALSE, 'system', 'Phase 2 crypto: SOL/USDT'),
+            ('asset_group_crypto_phase3_enabled', FALSE, 'system', 'Phase 3 crypto: BNB/USDT + XRP/USDT'),
+            ('asset_group_crypto_phase4_enabled', FALSE, 'system', 'Phase 4 crypto: LINK/USDT'),
+            ('asset_group_etf_wave1_enabled',     TRUE,  'system', 'Wave 1 ETF: SPY/QQQ/SOXX/IBIT via Alpaca'),
+            ('asset_group_etf_phase5_enabled',    FALSE, 'system', 'Future ETF wave: IWM/TLT/GLD via Alpaca'),
+            ('asset_experimental_doge_enabled',   FALSE, 'system', 'Experimental DOGE/USDT')
         ON CONFLICT (flag_name) DO NOTHING
     """)
 

@@ -17,7 +17,9 @@ Usage:
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime
+from typing import Any
 
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
@@ -94,6 +96,15 @@ async def backtest_refresh_job() -> None:
 _INTRADAY_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h"}
 _TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
 
+# Bootstrap window (calendar days) for each Wave 1 ETF on first ingestion run.
+# Larger than required_history_days to provide richer backtest coverage.
+_ETF_BOOTSTRAP_DAYS: dict[str, int] = {
+    "SPY": 730,
+    "QQQ": 730,
+    "SOXX": 730,
+    "IBIT": 365,  # launched Jan 2024; 365 days is the practical maximum
+}
+
 
 def _has_existing_data(exchange_id: str, symbol: str, timeframe: str) -> bool:
     """Return True if any Parquet file exists for this (exchange, symbol, timeframe)."""
@@ -106,17 +117,56 @@ def _has_existing_data(exchange_id: str, symbol: str, timeframe: str) -> bool:
     return parquet_dir.exists() and any(parquet_dir.glob("*.parquet"))
 
 
+async def _close_exchange_if_supported(exchange: Any) -> None:
+    close = getattr(exchange, "close", None)
+    if close is None:
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _asset_data_ingestion_allowed(symbol: str) -> bool:
+    """Honor global and per-asset feature flags before fetching data."""
+    from trading_bot.asset_universe import get_asset_registry
+    from trading_bot.feature_flags import is_enabled
+
+    if not await is_enabled("data_ingestion_enabled"):
+        log.info("ohlcv_ingestion_skipped_flag", symbol=symbol, flag="data_ingestion_enabled")
+        return False
+
+    registry = get_asset_registry()
+    spec = registry.get(symbol)
+    if spec is None:
+        log.warning("ohlcv_ingestion_skipped_unknown_asset", symbol=symbol)
+        return False
+    if not registry.is_data_eligible(symbol):
+        log.info("ohlcv_ingestion_skipped_disabled_asset", symbol=symbol)
+        return False
+    if spec.feature_flag and not await is_enabled(spec.feature_flag):
+        log.info(
+            "ohlcv_ingestion_skipped_asset_flag",
+            symbol=symbol,
+            feature_flag=spec.feature_flag,
+        )
+        return False
+    return True
+
+
 async def daily_ohlcv_ingestion_job(
     exchange_id: str = "binance",
     symbol: str = "BTC/USDT",
     timeframe: str = "1d",
+    bootstrap_days: int = 730,
 ) -> None:
     """OHLCV ingestion job — window adapts to timeframe.
 
     Intraday (1h etc.):
       - Bootstrap (no existing data): 30 days of history so strategies have enough bars.
       - Gap-fill (data exists): end - 4 h window.
-    Daily: end = midnight, start = end - 2 days.
+    Daily:
+      - Bootstrap (no existing data): bootstrap_days of history (default 730).
+      - Gap-fill (data exists): end - 3 days (covers weekend gaps).
     Idempotent: deduplication ensures no duplicates.
     Failures are alerted to Telegram so silent data outages are visible.
     """
@@ -133,6 +183,9 @@ async def daily_ohlcv_ingestion_job(
         timeframe=timeframe,
     )
 
+    if not await _asset_data_ingestion_allowed(symbol):
+        return
+
     now = datetime.now(UTC)
     if timeframe in _INTRADAY_TIMEFRAMES:
         interval_s = _TIMEFRAME_SECONDS[timeframe]
@@ -145,8 +198,9 @@ async def daily_ohlcv_ingestion_job(
         start = end - timedelta(days=30 if bootstrap else 4)
     else:
         end = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start = end - timedelta(days=2)  # 2-day window to catch gaps
-        bootstrap = False
+        bootstrap = not _has_existing_data(exchange_id, symbol, timeframe)
+        # Bootstrap: full history window; gap-fill: 3-day window (covers weekend gaps).
+        start = end - timedelta(days=bootstrap_days if bootstrap else 3)
 
     exchange = get_exchange(ExchangeId(exchange_id))
     downloader = OHLCVDownloader(exchange=exchange)
@@ -170,7 +224,7 @@ async def daily_ohlcv_ingestion_job(
         _send_ingestion_alert(symbol, timeframe, str(e))
         raise
     finally:
-        await exchange.close()  # type: ignore[attr-defined]
+        await _close_exchange_if_supported(exchange)
 
     log.info(
         "ohlcv_ingestion_complete",
@@ -405,15 +459,20 @@ async def evidence_weekly_summary_job() -> None:
 def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     """Register the default daily ingestion jobs.
 
-    Symbols and timeframes are read from settings.trading.crypto — edit
-    base.yaml (or an env-specific YAML) to add/remove assets without
+    Symbols and timeframes are read from settings.trading.crypto and
+    settings.trading.equity — edit base.yaml to add/remove assets without
     touching this file.
+
+    Crypto jobs: Binance, hourly (intraday) or daily 01:00 UTC.
+    Equity jobs: Alpaca, daily 01:30+ UTC (after crypto daily jobs).
+    Bootstrap window for equity is derived from _ETF_BOOTSTRAP_DAYS.
 
     Call after create_scheduler() and before scheduler.start().
     """
     from trading_bot.config import get_settings
 
-    crypto = get_settings().trading.crypto
+    settings = get_settings()
+    crypto = settings.trading.crypto
     daily_minute_offset = 0
     for symbol in crypto.symbols:
         symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
@@ -447,6 +506,32 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                     kwargs=kwargs,
                 )
                 daily_minute_offset += 15
+
+    # Equity (Alpaca) — daily bars only; start at minute 30 to avoid overlap with crypto
+    equity = settings.trading.equity
+    equity_minute_offset = 30
+    for symbol in equity.symbols:
+        symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
+        bootstrap_days = _ETF_BOOTSTRAP_DAYS.get(symbol, 730)
+        for timeframe in equity.timeframes:
+            job_id = f"ohlcv_{symbol_safe}_{timeframe}"
+            scheduler.add_job(
+                daily_ohlcv_ingestion_job,
+                trigger="cron",
+                hour=1,
+                minute=equity_minute_offset,
+                id=job_id,
+                name=f"Daily {symbol} {timeframe} ingestion (alpaca)",
+                replace_existing=True,
+                next_run_time=datetime.now(UTC),  # bootstrap immediately on startup
+                kwargs={
+                    "exchange_id": equity.exchange,
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "bootstrap_days": bootstrap_days,
+                },
+            )
+            equity_minute_offset += 5
 
     scheduler.add_job(
         signal_refresh_job,

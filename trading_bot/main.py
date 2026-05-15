@@ -225,11 +225,17 @@ async def _startup() -> tuple[
             )
 
     # ── WebSocket price feed ──────────────────────────────────────────────
-    price_cache = get_price_cache()
-    ws_symbols = [s.replace("/", "") for s in settings.trading.crypto.symbols]
-    ws_client = BinanceWebSocketClient(symbols=ws_symbols, on_tick=price_cache.update)
-    ws_client.start()
-    log.info("websocket_started", symbols=ws_symbols)
+    from trading_bot.feature_flags import is_enabled
+
+    ws_client = None
+    if await is_enabled("websocket_enabled"):
+        price_cache = get_price_cache()
+        ws_symbols = [s.replace("/", "") for s in settings.trading.crypto.symbols]
+        ws_client = BinanceWebSocketClient(symbols=ws_symbols, on_tick=price_cache.update)
+        ws_client.start()
+        log.info("websocket_started", symbols=ws_symbols)
+    else:
+        log.info("websocket_skipped_flag", flag="websocket_enabled")
 
     # ── Dashboard wiring (pool + scheduler available now) ─────────────────
     init_dashboard(pool=pool, scheduler=scheduler)

@@ -156,6 +156,32 @@ class TestOHLCVDownloader:
         assert data["schema_version"] == "1.0"
 
     @pytest.mark.asyncio
+    async def test_alpaca_lineage_uses_alpaca_source(
+        self, downloader: OHLCVDownloader, mock_exchange: AsyncMock, tmp_path: Path
+    ) -> None:
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        end = datetime(2024, 1, 3, tzinfo=UTC)
+        mock_exchange.fetch_ohlcv.return_value = _make_raw_bars(
+            start,
+            2,
+            symbol="SPY",
+            timeframe="1d",
+        )
+
+        await downloader.download(ExchangeId.ALPACA, "SPY", "1d", start, end)
+
+        parquet = tmp_path / "raw" / "alpaca" / "SPY" / "1d" / "2024-01.parquet"
+        df = pd.read_parquet(parquet)
+        assert set(df["source"]) == {"alpaca.fetch_ohlcv"}
+
+        import json
+
+        lineage = json.loads(parquet.with_suffix(".lineage.json").read_text())
+        assert lineage["source"] == "alpaca.fetch_ohlcv:SPY:1d"
+        assert lineage["provider"] == "alpaca"
+        assert lineage["exchange"] == "alpaca"
+
+    @pytest.mark.asyncio
     async def test_empty_response_returns_zero(
         self, downloader: OHLCVDownloader, mock_exchange: AsyncMock
     ) -> None:

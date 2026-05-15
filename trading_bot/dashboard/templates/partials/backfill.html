@@ -2,13 +2,16 @@
 <div class="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
   <h2 class="text-sm font-semibold text-gray-300">
     ისტორიული მონაცემები
-    <span class="text-xs text-gray-600 font-normal ml-1">1d · Binance</span>
+    <span class="text-xs text-gray-600 font-normal ml-1">1d · crypto + ETF</span>
   </h2>
 
   {% for s in symbols_stats %}
   <div class="bg-gray-800 rounded-lg p-3">
-    <div class="flex items-center justify-between mb-3">
-      <span class="text-xs font-semibold text-gray-300">{{ s.symbol }}</span>
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-semibold text-gray-300">{{ s.symbol }}</span>
+        <span class="text-xs text-gray-600 uppercase">{{ s.exchange }}</span>
+      </div>
 
       {% if backfill.running and backfill.symbol == s.symbol %}
         <span class="text-xs bg-blue-900 text-blue-300 px-3 py-1 rounded-full animate-pulse">
@@ -16,13 +19,13 @@
         </span>
       {% elif s.bar_count == 0 %}
         <button
-          hx-post="/admin/backfill?symbol={{ s.symbol }}&timeframe=1d&days_back=730"
+          hx-post="/admin/backfill?symbol={{ s.symbol }}&timeframe=1d&days_back={{ s.required_history_days }}"
           hx-swap="none"
           hx-on::after-request="htmx.ajax('GET', '/partials/backfill', {target:'#backfill-section', swap:'innerHTML'})"
-          onclick="return confirm('ჩამოიტვირთება ~730 დღის {{ s.symbol }} data. გაგრძელება?')"
+          onclick="return confirm('ჩამოიტვირთება ~{{ s.required_history_days }} დღის {{ s.symbol }} data ({{ s.exchange }}). გაგრძელება?')"
           class="text-xs bg-blue-900 text-blue-300 hover:bg-blue-800 px-3 py-1 rounded font-semibold transition-colors"
         >
-          ჩამოტვირთე 2 წლის Data
+          ჩამოტვირთე ({{ s.required_history_days }}d)
         </button>
       {% else %}
         <button
@@ -55,7 +58,7 @@
 
     {% if s.bar_count == 0 and not backfill.running %}
     <p class="mt-2 text-xs text-gray-600">
-      სტრატეგიები მოითხოვენ ისტორიულ data-ს — დააჭირე ღილაკს.
+      სტრატეგიები მოითხოვენ {{ s.required_history_days }} დღის data-ს — დააჭირე ღილაკს.
     </p>
     {% endif %}
   </div>

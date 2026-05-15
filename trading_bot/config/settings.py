@@ -222,7 +222,8 @@ class TradingEquitySettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     exchange: str = "alpaca"
-    symbols: list[str] = Field(default_factory=lambda: ["SPY", "QQQ", "SOXX"])
+    symbols: list[str] = Field(default_factory=lambda: ["SPY", "QQQ", "SOXX", "IBIT"])
+    timeframes: list[str] = Field(default_factory=lambda: ["1d"])
 
 
 class TradingSettings(BaseSettings):

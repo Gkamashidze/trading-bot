@@ -76,6 +76,17 @@ def _save_last_signal() -> None:
 _last_signal: dict[str, str] = _load_last_signal()
 
 
+def _asset_is_tradeable(symbol: str) -> bool:
+    """Return True when asset universe permits paper trading for this symbol."""
+    try:
+        from trading_bot.asset_universe import get_asset_registry
+
+        return get_asset_registry().is_tradeable(symbol)
+    except Exception as exc:
+        log.warning("router_asset_registry_unavailable", symbol=symbol, error=str(exc))
+        return False
+
+
 def _record_reconciliation_rejection(
     result: StrategyResult,
     tracker: object,
@@ -162,6 +173,14 @@ async def route_signal(result: StrategyResult) -> None:
     if result.signal == prev:
         log.debug(
             "router_skip_repeated_signal",
+            strategy=result.strategy_id,
+            signal=result.signal,
+        )
+        return
+    if not _asset_is_tradeable(result.symbol):
+        log.warning(
+            "router_asset_not_tradeable",
+            symbol=result.symbol,
             strategy=result.strategy_id,
             signal=result.signal,
         )
@@ -275,7 +294,12 @@ async def route_signal(result: StrategyResult) -> None:
         fill_resp = await _exchange.place_order(order)
         actual_price = Decimal(fill_resp["fill_price"])
         actual_filled_qty = Decimal(str(fill_resp.get("filled_quantity", order.quantity)))
-        portfolio.apply_fill(order, actual_price)
+        portfolio.apply_fill(order, actual_price, filled_quantity=actual_filled_qty)
+        order_status = (
+            OrderStatus.PARTIALLY_FILLED
+            if fill_resp.get("status") == OrderStatus.PARTIALLY_FILLED.value
+            else OrderStatus.FILLED
+        )
 
         order_state = OrderState(
             client_order_id=order.client_order_id,
@@ -287,7 +311,7 @@ async def route_signal(result: StrategyResult) -> None:
             requested_quantity=order.quantity,
             filled_quantity=actual_filled_qty,
             average_fill_price=actual_price,
-            status=OrderStatus.FILLED,
+            status=order_status,
             strategy_id=order.strategy_id,
         )
         tracker.record(order_state)
@@ -304,7 +328,11 @@ async def route_signal(result: StrategyResult) -> None:
             fill_price=float(actual_price),
             quantity=float(actual_filled_qty),
             latency_ms=fill_latency_ms,
-            outcome=OrderOutcome.FILLED,
+            outcome=(
+                OrderOutcome.PARTIAL
+                if order_status == OrderStatus.PARTIALLY_FILLED
+                else OrderOutcome.FILLED
+            ),
         )
 
         # ── Accounting: record trade lot + FIFO PnL ───────────────────────

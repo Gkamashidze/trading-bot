@@ -175,3 +175,5 @@ trading:
       - "QQQ"
       - "SOXX"
       - "IBIT"   # Bitcoin spot ETF — trades on US equity hours via Alpaca
+    timeframes:
+      - "1d"

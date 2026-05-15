@@ -110,6 +110,9 @@ def _require_api_key(api_key: str | None = Security(_api_key_header)) -> None:
     Set DASHBOARD_API_KEY env var. If unset, auth is disabled (dev mode only).
     """
     expected = os.environ.get("DASHBOARD_API_KEY", "")
+    environment = os.environ.get("ENVIRONMENT", "development").lower()
+    if not expected and environment in {"staging", "production"}:
+        raise HTTPException(status_code=503, detail="DASHBOARD_API_KEY is required")
     if expected and api_key != expected:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
@@ -118,7 +121,13 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Trading Bot Dashboard", docs_url=None, redoc_url=None)
 
     # CORS — restrict to configured origin in production
-    allowed_origins = os.environ.get("DASHBOARD_ALLOWED_ORIGIN", "*").split(",")
+    allowed_origin_env = os.environ.get("DASHBOARD_ALLOWED_ORIGIN")
+    if allowed_origin_env:
+        allowed_origins = [o.strip() for o in allowed_origin_env.split(",") if o.strip()]
+    elif os.environ.get("ENVIRONMENT", "development").lower() in {"staging", "production"}:
+        allowed_origins = []
+    else:
+        allowed_origins = ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -268,7 +277,10 @@ def create_app() -> FastAPI:
             async with _pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """UPDATE feature_flags
-                       SET enabled = NOT enabled, changed_at = NOW()
+                       SET enabled = NOT enabled,
+                           changed_by = 'dashboard',
+                           reason = 'dashboard toggle',
+                           changed_at = NOW()
                        WHERE flag_name = $1
                        RETURNING flag_name AS name, enabled, reason AS description""",
                     name,
@@ -301,20 +313,27 @@ def create_app() -> FastAPI:
 
     @app.get("/partials/backfill", response_class=HTMLResponse)
     async def partial_backfill_status(request: Request) -> HTMLResponse:
-        """Show per-symbol data availability summary + backfill trigger buttons."""
+        """Show per-symbol data availability summary + backfill trigger buttons.
+
+        Covers all research-eligible assets (crypto + ETF) from the asset registry,
+        not just the crypto symbols list. Exchange directory is derived from asset venue.
+        """
         from pathlib import Path
 
         import pandas as pd
 
+        from trading_bot.asset_universe import get_asset_registry
         from trading_bot.config import get_settings
 
         settings = get_settings()
         raw_path = Path(settings.storage.raw_path)
 
         symbols_stats = []
-        for symbol in settings.trading.crypto.symbols:
-            symbol_safe = symbol.replace("/", "_")
-            parquet_dir = raw_path / "binance" / symbol_safe / "1d"
+        for asset in get_asset_registry().research_and_above():
+            symbol = asset.symbol
+            symbol_safe = symbol.replace("/", "_").replace(":", "_")
+            exchange_dir = str(asset.venue)  # "binance" or "alpaca"
+            parquet_dir = raw_path / exchange_dir / symbol_safe / "1d"
 
             bar_count = 0
             date_from: str | None = None
@@ -339,9 +358,12 @@ def create_app() -> FastAPI:
             symbols_stats.append(
                 {
                     "symbol": symbol,
+                    "exchange": exchange_dir,
+                    "asset_class": str(asset.asset_class),
                     "bar_count": bar_count,
                     "date_from": date_from,
                     "date_to": date_to,
+                    "required_history_days": asset.required_history_days,
                 }
             )
 
@@ -393,7 +415,7 @@ def create_app() -> FastAPI:
             global _backfill_status
             import datetime as dt
 
-            from trading_bot.core.models import ExchangeId
+            from trading_bot.asset_universe import get_asset_registry
             from trading_bot.data.ingestion import OHLCVDownloader
             from trading_bot.exchange import get_exchange
 
@@ -409,31 +431,43 @@ def create_app() -> FastAPI:
             try:
                 end = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                 start = end - dt.timedelta(days=days_back)
-                exchange = get_exchange(ExchangeId.BINANCE)
-                downloader = OHLCVDownloader(exchange=exchange)
-                bars = await downloader.download(
-                    exchange_id=ExchangeId.BINANCE,
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    start=start,
-                    end=end,
-                )
-                await exchange.close()  # type: ignore[attr-defined]
+
+                # Resolve exchange from asset registry — no hardcoded Binance
+                spec = get_asset_registry().get(symbol)
+                if spec is None:
+                    raise ValueError(f"Symbol {symbol!r} not found in asset registry")
+                exchange_id = spec.venue
+
+                exchange = get_exchange(exchange_id)
+                try:
+                    downloader = OHLCVDownloader(exchange=exchange)
+                    bars = await downloader.download(
+                        exchange_id=exchange_id,
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        start=start,
+                        end=end,
+                    )
+                finally:
+                    close = getattr(exchange, "close", None)
+                    if close is not None:
+                        await close()
                 if bars > 0:
                     from trading_bot.core.models import DataLineage
                     from trading_bot.data.lineage import get_lineage_store
 
+                    exchange_str = str(exchange_id)
                     symbol_safe = symbol.replace("/", "_").replace(":", "_")
                     snapshot_id = get_lineage_store().create_snapshot(
                         DataLineage(
-                            source="binance.fetch_ohlcv",
+                            source=f"{exchange_str}.fetch_ohlcv",
                             fetched_at=datetime.now(UTC),
                             row_count=bars,
-                            provider="binance",
-                            exchange="BINANCE",
+                            provider=exchange_str,
+                            exchange=exchange_str.upper(),
                             symbol=symbol,
                             timeframe=timeframe,
-                            storage_path=f"binance/{symbol_safe}/{timeframe}",
+                            storage_path=f"{exchange_str}/{symbol_safe}/{timeframe}",
                         )
                     )
                     log.info(

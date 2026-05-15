@@ -32,11 +32,13 @@ log = get_logger(__name__)
 
 # YAML defaults are loaded once at module import — DB values override these.
 _YAML_DEFAULTS: dict[str, bool] = {}
+_YAML_DESCRIPTIONS: dict[str, str] = {}
 _yaml_path = Path(__file__).parent.parent / "config" / "feature_flags.yaml"
 if _yaml_path.exists():
     _raw = yaml.safe_load(_yaml_path.read_text()) or {}
     for name, meta in (_raw.get("flags") or {}).items():
         _YAML_DEFAULTS[name] = bool(meta.get("default", False))
+        _YAML_DESCRIPTIONS[name] = str(meta.get("description", ""))
 
 # Safety-critical flags that default to False even on DB failure
 _SAFETY_CRITICAL = {"live_trading_enabled", "canary_trade_enabled"}
@@ -141,6 +143,7 @@ class FeatureFlagStore(FeatureFlagStoreInterface):
         """Reload all flags from DB into cache."""
         try:
             async with self._pool.acquire() as conn:
+                await self._ensure_yaml_defaults(conn)
                 rows = await conn.fetch("SELECT flag_name, enabled FROM feature_flags")
             async with self._lock:
                 for row in rows:
@@ -177,3 +180,25 @@ class FeatureFlagStore(FeatureFlagStoreInterface):
         if flag_name in _SAFETY_CRITICAL:
             return False
         return _YAML_DEFAULTS.get(flag_name, False)
+
+    async def _ensure_yaml_defaults(self, conn: Any) -> None:
+        """Insert newly declared YAML flags into DB without overriding operator changes."""
+        if not _YAML_DEFAULTS:
+            return
+        rows = [
+            (
+                name,
+                enabled,
+                "system",
+                _YAML_DESCRIPTIONS.get(name, "YAML default"),
+            )
+            for name, enabled in _YAML_DEFAULTS.items()
+        ]
+        await conn.executemany(
+            """
+            INSERT INTO feature_flags (flag_name, enabled, changed_by, reason)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (flag_name) DO NOTHING
+            """,
+            rows,
+        )
