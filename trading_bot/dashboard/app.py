@@ -279,7 +279,6 @@ def create_app() -> FastAPI:
                     """UPDATE feature_flags
                        SET enabled = NOT enabled,
                            changed_by = 'dashboard',
-                           reason = 'dashboard toggle',
                            changed_at = NOW()
                        WHERE flag_name = $1
                        RETURNING flag_name AS name, enabled, reason AS description""",
