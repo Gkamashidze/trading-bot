@@ -59,6 +59,22 @@
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: #0f172a; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    /* ───── tab navigation ───── */
+    .tab-btn {
+      color: rgb(107 114 128);
+      transition: all 0.15s;
+      border: 1px solid transparent;
+    }
+    .tab-btn:hover {
+      color: rgb(229 231 235);
+      background: rgba(255,255,255,0.05);
+    }
+    .tab-btn.active-tab {
+      color: white;
+      background: rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.35);
+    }
   </style>
 </head>
 
@@ -67,8 +83,9 @@
   <!-- ═══════════════════════════════════════════════════════════════════
        STICKY HEADER — ყოველთვის ჩანს სქროლის დროსაც
        ═══════════════════════════════════════════════════════════════════ -->
-  <header class="sticky top-0 z-50 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800 px-4 sm:px-6 py-3">
-    <div class="max-w-6xl mx-auto flex items-center justify-between">
+  <header class="sticky top-0 z-50 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800 px-4 sm:px-6">
+    <!-- Row 1: Logo + badges -->
+    <div class="max-w-6xl mx-auto flex items-center justify-between pt-3 pb-2">
       <div class="flex items-center gap-3">
         <span class="text-base font-bold text-white tracking-tight">🤖 Trading Bot</span>
         <span class="hidden sm:inline text-xs text-gray-600 border border-gray-800 rounded px-1.5 py-0.5">Stage 8</span>
@@ -82,251 +99,273 @@
         </span>
       </div>
     </div>
+    <!-- Row 2: Tab navigation -->
+    <nav class="max-w-6xl mx-auto flex gap-1 pb-2">
+      <button onclick="switchTab('overview')" id="tab-btn-overview"
+        class="tab-btn active-tab px-4 py-1.5 rounded-lg text-sm font-medium">
+        🏠 მთავარი
+      </button>
+      <button onclick="switchTab('analytics')" id="tab-btn-analytics"
+        class="tab-btn px-4 py-1.5 rounded-lg text-sm font-medium">
+        📊 ანალიტიკა
+      </button>
+      <button onclick="switchTab('admin')" id="tab-btn-admin"
+        class="tab-btn px-4 py-1.5 rounded-lg text-sm font-medium">
+        ⚙️ ადმინი
+      </button>
+    </nav>
   </header>
 
-  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-5 space-y-4">
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-5">
 
     <!-- ═══════════════════════════════════════════════════════════════
-         ROW 1: ცოცხალი ფასები — განახლება ყოველ 5 წამში
+         TAB 1: მთავარი — ყოველდღიური მონიტორინგი
          ═══════════════════════════════════════════════════════════════ -->
-    <section
-      id="prices-section"
-      hx-get="/partials/prices"
-      hx-trigger="load, every 5s"
-      hx-swap="innerHTML"
-    >
-      <div class="grid grid-cols-2 gap-4">
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 animate-pulse">
-          <p class="text-xs text-gray-600">Bitcoin (BTC) / დოლარი</p>
-          <p class="text-2xl font-bold text-gray-700 mt-1">$——,———</p>
-        </div>
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 animate-pulse">
-          <p class="text-xs text-gray-600">Ethereum (ETH) / დოლარი</p>
-          <p class="text-2xl font-bold text-gray-700 mt-1">$——,———</p>
-        </div>
-      </div>
-    </section>
+    <div id="tab-overview" class="space-y-4">
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         ROW 2: სისტემის სტატუსი — განახლება ყოველ 10 წამში
-         ═══════════════════════════════════════════════════════════════ -->
-    <section
-      id="status-section"
-      hx-get="/partials/status"
-      hx-trigger="load, every 10s"
-      hx-swap="innerHTML"
-    >
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
-      </div>
-    </section>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         ROW 3: მთავარი 2-სვეტი
-         მარცხ: უსაფრთხოება | მარჯვ: ფინანსური მდგომარეობა
-         ═══════════════════════════════════════════════════════════════ -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-      <!-- უსაფრთხოება — 30s -->
+      <!-- ცოცხალი ფასები — 5s -->
       <section
-        id="safety-section"
-        hx-get="/partials/safety"
-        hx-trigger="load, every 30s"
+        id="prices-section"
+        hx-get="/partials/prices"
+        hx-trigger="load, every 5s"
+        hx-swap="innerHTML"
+      >
+        <div class="grid grid-cols-2 gap-4">
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 animate-pulse">
+            <p class="text-xs text-gray-600">Bitcoin (BTC) / დოლარი</p>
+            <p class="text-2xl font-bold text-gray-700 mt-1">$——,———</p>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 animate-pulse">
+            <p class="text-xs text-gray-600">Ethereum (ETH) / დოლარი</p>
+            <p class="text-2xl font-bold text-gray-700 mt-1">$——,———</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- სისტემის სტატუსი — 10s -->
+      <section
+        id="status-section"
+        hx-get="/partials/status"
+        hx-trigger="load, every 10s"
+        hx-swap="innerHTML"
+      >
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-3 animate-pulse h-16"></div>
+        </div>
+      </section>
+
+      <!-- უსაფრთხოება + პორტფელი — 2-სვეტი -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- უსაფრთხოება — 30s -->
+        <section
+          id="safety-section"
+          hx-get="/partials/safety"
+          hx-trigger="load, every 30s"
+          hx-swap="innerHTML"
+        >
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 animate-pulse"></div>
+        </section>
+
+        <!-- პორტფელი — 60s -->
+        <section
+          id="portfolio-section"
+          hx-get="/partials/paper_portfolio"
+          hx-trigger="load, every 60s"
+          hx-swap="innerHTML"
+        >
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 animate-pulse"></div>
+        </section>
+      </div>
+
+      <!-- Alpaca ანგარიში — 60s -->
+      <section
+        id="alpaca-account-section"
+        hx-get="/partials/alpaca_account"
+        hx-trigger="load, every 60s"
         hx-swap="innerHTML"
       >
         <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 animate-pulse"></div>
       </section>
 
-      <!-- პორტფელი — 60s -->
-      <section
-        id="portfolio-section"
-        hx-get="/partials/paper_portfolio"
-        hx-trigger="load, every 60s"
-        hx-swap="innerHTML"
-      >
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 animate-pulse"></div>
-      </section>
-
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         ROW 4: Alpaca Paper Account — real broker data
-         ═══════════════════════════════════════════════════════════════ -->
-    <section
-      id="alpaca-account-section"
-      hx-get="/partials/alpaca_account"
-      hx-trigger="load, every 60s"
-      hx-swap="innerHTML"
-    >
-      <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 h-48 animate-pulse"></div>
-    </section>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 📈 Equity Curve — კაპიტალის ცვლილება დროთა განმავლობაში
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">📈 Equity Curve</span>
-          <span class="text-xs text-gray-500 font-normal">— ანგარიშის ღირებულება დროის მიხედვით</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5 pt-2"
-        id="equity-chart-section"
-        hx-get="/partials/equity_chart"
-        hx-trigger="load, every 300s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse text-center">გრაფიკი იტვირთება...</div>
-      </div>
-    </details>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 🌐 Asset Universe — ასეტების სამყარო
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl">
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">🌐 Asset Universe</span>
-          <span class="text-xs text-gray-500 font-normal">— ყველა ასეტი: სტატუსი, ლიმიტი, ფაზა</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5"
-        id="asset-universe-section"
-        hx-get="/partials/asset_universe"
-        hx-trigger="load, every 300s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse">Asset universe იტვირთება...</div>
-      </div>
-    </details>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 🧭 სიგნალები — ბოტის გადაწყვეტილებები
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">🧭 სიგნალები</span>
-          <span class="text-xs text-gray-500 font-normal">— ბოტი ამბობს "იყიდე", "გაყიდე" ან "ელოდე"</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5"
-        id="signals-section"
-        hx-get="/partials/signals"
-        hx-trigger="load, every 60s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse">სიგნალები იტვირთება...</div>
-      </div>
-    </details>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 📊 Backtesting — სიმულაცია წარსულ მონაცემებზე
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl">
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">📊 Backtesting შედეგები</span>
-          <span class="text-xs text-gray-500 font-normal">— წარსულ მონაცემებზე სიმულაცია</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5"
-        id="backtest-section"
-        hx-get="/partials/backtest"
-        hx-trigger="load, every 300s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse">Backtest შედეგები იტვირთება...</div>
-      </div>
-    </details>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 🎯 Promotion პროგრესი — micro-live-მდე გზა
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">🎯 micro-live-მდე გზა</span>
-          <span class="text-xs text-gray-500 font-normal">— რა გვაკლია რეალურ ფულზე გადასვლამდე</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5"
-        id="promotion-progress-section"
-        hx-get="/partials/promotion_progress"
-        hx-trigger="load, every 60s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse">პროგრესი იტვირთება...</div>
-      </div>
-    </details>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 🌍 ბაზრის გარემო
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl">
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">🌍 ბაზრის გარემო</span>
-          <span class="text-xs text-gray-500 font-normal">— Fear &amp; Greed, Funding Rate, მაკრო</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5"
-        id="market-context-section"
-        hx-get="/partials/market_context"
-        hx-trigger="load, every 300s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse">ბაზრის კონტექსტი იტვირთება...</div>
-      </div>
-    </details>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: ⚙️ სისტემის მართვა — Flags, Jobs, Backfill
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl">
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">⚙️ სისტემის მართვა</span>
-          <span class="text-xs text-gray-500 font-normal">— ჩამრთველები, ავტო-სამუშაოები, მონაცემები</span>
-        </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div class="px-5 pb-5 pt-1 space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div
-            id="flags-section"
-            hx-get="/partials/flags"
-            hx-trigger="load, every 30s"
-            hx-swap="innerHTML"
-          >
-            <div class="bg-gray-800 rounded-lg p-3 h-24 animate-pulse"></div>
+      <!-- სიგნალები — 60s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">🧭 სიგნალები</span>
+            <span class="text-xs text-gray-500 font-normal">— ბოტი ამბობს "იყიდე", "გაყიდე" ან "ელოდე"</span>
           </div>
-          <div
-            id="jobs-section"
-            hx-get="/partials/jobs"
-            hx-trigger="load, every 30s"
-            hx-swap="innerHTML"
-          >
-            <div class="bg-gray-800 rounded-lg p-3 h-24 animate-pulse"></div>
-          </div>
-        </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
         <div
+          class="px-5 pb-5"
+          id="signals-section"
+          hx-get="/partials/signals"
+          hx-trigger="load, every 60s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse">სიგნალები იტვირთება...</div>
+        </div>
+      </details>
+
+      <!-- micro-live-მდე გზა — 60s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">🎯 micro-live-მდე გზა</span>
+            <span class="text-xs text-gray-500 font-normal">— რა გვაკლია რეალურ ფულზე გადასვლამდე</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5"
+          id="promotion-progress-section"
+          hx-get="/partials/promotion_progress"
+          hx-trigger="load, every 60s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse">პროგრესი იტვირთება...</div>
+        </div>
+      </details>
+
+    </div><!-- /tab-overview -->
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 2: ანალიტიკა — სიღრმისეული ანალიზი
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="tab-analytics" class="hidden space-y-4">
+
+      <!-- Equity Curve — 300s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">📈 Equity Curve</span>
+            <span class="text-xs text-gray-500 font-normal">— ანგარიშის ღირებულება დროის მიხედვით</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5 pt-2"
+          id="equity-chart-section"
+          hx-get="/partials/equity_chart"
+          hx-trigger="load, every 300s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse text-center">გრაფიკი იტვირთება...</div>
+        </div>
+      </details>
+
+      <!-- Backtesting — 300s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">📊 Backtesting შედეგები</span>
+            <span class="text-xs text-gray-500 font-normal">— წარსულ მონაცემებზე სიმულაცია</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5"
+          id="backtest-section"
+          hx-get="/partials/backtest"
+          hx-trigger="load, every 300s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse">Backtest შედეგები იტვირთება...</div>
+        </div>
+      </details>
+
+      <!-- ბაზრის გარემო — 300s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">🌍 ბაზრის გარემო</span>
+            <span class="text-xs text-gray-500 font-normal">— Fear &amp; Greed, Funding Rate, მაკრო</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5"
+          id="market-context-section"
+          hx-get="/partials/market_context"
+          hx-trigger="load, every 300s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse">ბაზრის კონტექსტი იტვირთება...</div>
+        </div>
+      </details>
+
+    </div><!-- /tab-analytics -->
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 3: ადმინი — ტექნიკური მართვა
+         ═══════════════════════════════════════════════════════════════ -->
+    <div id="tab-admin" class="hidden space-y-4">
+
+      <!-- Asset Universe — 300s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl">
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">🌐 Asset Universe</span>
+            <span class="text-xs text-gray-500 font-normal">— ყველა ასეტი: სტატუსი, ლიმიტი, ფაზა</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5"
+          id="asset-universe-section"
+          hx-get="/partials/asset_universe"
+          hx-trigger="load, every 300s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse">Asset universe იტვირთება...</div>
+        </div>
+      </details>
+
+      <!-- Feature Flags + Scheduled Jobs — 30s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl" open>
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">⚙️ სისტემის მართვა</span>
+            <span class="text-xs text-gray-500 font-normal">— ჩამრთველები და ავტო-სამუშაოები</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div class="px-5 pb-5 pt-1">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div
+              id="flags-section"
+              hx-get="/partials/flags"
+              hx-trigger="load, every 30s"
+              hx-swap="innerHTML"
+            >
+              <div class="bg-gray-800 rounded-lg p-3 h-24 animate-pulse"></div>
+            </div>
+            <div
+              id="jobs-section"
+              hx-get="/partials/jobs"
+              hx-trigger="load, every 30s"
+              hx-swap="innerHTML"
+            >
+              <div class="bg-gray-800 rounded-lg p-3 h-24 animate-pulse"></div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Historical Data Backfill — 30s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl">
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">🗄️ ისტორიული მონაცემები</span>
+            <span class="text-xs text-gray-500 font-normal">— OHLCV ჩამოტვირთვა და სტატუსი</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5"
           id="backfill-section"
           hx-get="/partials/backfill"
           hx-trigger="load, every 30s"
@@ -334,36 +373,44 @@
         >
           <div class="bg-gray-800 rounded-lg p-3 h-16 animate-pulse"></div>
         </div>
-      </div>
-    </details>
+      </details>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         EXPANDABLE: 📋 ჟურნალი (Audit Log)
-         ═══════════════════════════════════════════════════════════════ -->
-    <details class="bg-gray-900 border border-gray-800 rounded-xl">
-      <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold text-gray-100">📋 ჟურნალი</span>
-          <span class="text-xs text-gray-500 font-normal">— ყველა ქმედება ჩაწერილია (Audit Log)</span>
+      <!-- Audit Log — 15s -->
+      <details class="bg-gray-900 border border-gray-800 rounded-xl">
+        <summary class="flex items-center justify-between px-5 py-3.5 hover:bg-gray-800/40 rounded-xl transition-colors">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-gray-100">📋 ჟურნალი</span>
+            <span class="text-xs text-gray-500 font-normal">— ყველა ქმედება ჩაწერილია (Audit Log)</span>
+          </div>
+          <span class="chevron text-gray-600 text-xs font-mono">▶</span>
+        </summary>
+        <div
+          class="px-5 pb-5"
+          id="audit-section"
+          hx-get="/partials/audit"
+          hx-trigger="load, every 15s"
+          hx-swap="innerHTML"
+        >
+          <div class="py-4 text-gray-600 text-sm animate-pulse">ჟურნალი იტვირთება...</div>
         </div>
-        <span class="chevron text-gray-600 text-xs font-mono">▶</span>
-      </summary>
-      <div
-        class="px-5 pb-5"
-        id="audit-section"
-        hx-get="/partials/audit"
-        hx-trigger="load, every 15s"
-        hx-swap="innerHTML"
-      >
-        <div class="py-4 text-gray-600 text-sm animate-pulse">ჟურნალი იტვირთება...</div>
-      </div>
-    </details>
+      </details>
+
+    </div><!-- /tab-admin -->
 
   </main>
 
   <footer class="border-t border-gray-900 px-6 py-3 mt-4 text-center text-xs text-gray-700">
     Trading Bot • Stage 8 — Quant &amp; AI Expansion • Paper mode • Live trading disabled
   </footer>
+
+  <script>
+    function switchTab(name) {
+      ['overview', 'analytics', 'admin'].forEach(function(t) {
+        document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
+        document.getElementById('tab-btn-' + t).classList.toggle('active-tab', t === name);
+      });
+    }
+  </script>
 
 </body>
 </html>
