@@ -97,6 +97,37 @@ class BinanceExchange(ExchangeInterface):
         """Close the underlying HTTP session. Call on shutdown."""
         await self._client.close()
 
+    def _assert_circuit_closed(self) -> None:
+        """Raise ExchangeBannedError if Binance has banned our IP."""
+        ban_seconds_remaining = check_circuit("binance")
+        if ban_seconds_remaining > 0:
+            raise ExchangeBannedError(
+                f"Binance IP ban active — {ban_seconds_remaining}s remaining",
+                banned_until_ms=int(time.time() * 1000) + ban_seconds_remaining * 1000,
+            )
+
+    def _handle_ccxt_error(self, exc: Exception) -> Exception:
+        """Translate a CCXT error into the proper trading_bot exception.
+
+        Trips the circuit if the error contains a 'banned until' marker.
+        Returns the exception to raise (caller does `raise self._handle_ccxt_error(e)`).
+        """
+        msg = str(exc)
+        banned_until_ms = parse_ban_timestamp_ms(msg)
+        if banned_until_ms is not None:
+            trip_circuit("binance", banned_until_ms)
+            return ExchangeBannedError(
+                f"Binance IP banned: {exc}",
+                banned_until_ms=banned_until_ms,
+            )
+        if isinstance(exc, ccxt.AuthenticationError):
+            return ExchangeAuthError(f"Binance auth failed: {exc}")
+        if isinstance(exc, ccxt.RateLimitExceeded):
+            return ExchangeRateLimitError(f"Binance rate limit: {exc}", retry_after_seconds=60.0)
+        if isinstance(exc, ccxt.NetworkError):
+            return ExchangeConnectionError(f"Binance network error: {exc}")
+        return exc
+
     # ── Read-only operations ────────────────────────────────────────────────
 
     @retry(
@@ -113,15 +144,7 @@ class BinanceExchange(ExchangeInterface):
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         """Fetch OHLCV bars from Binance. Returns raw CCXT format."""
-        # ── Circuit breaker: skip if Binance has banned our IP ───────────────
-        ban_seconds_remaining = check_circuit("binance")
-        if ban_seconds_remaining > 0:
-            raise ExchangeBannedError(
-                f"Binance IP ban active — {ban_seconds_remaining}s remaining",
-                banned_until_ms=int(time.time() * 1000) + ban_seconds_remaining * 1000,
-            )
-
-        # ── Preemptive throttle: if approaching weight limit, slow down ──────
+        self._assert_circuit_closed()
         await cooldown_if_needed("binance", seconds=60)
 
         since_ms: int | None = None
@@ -139,7 +162,6 @@ class BinanceExchange(ExchangeInterface):
                 raw = await self._client.fetch_ohlcv(
                     symbol, timeframe=timeframe, since=since_ms, limit=limit
                 )
-                # Record rate-limit header for preemptive throttling
                 self._record_rate_limit_headers()
                 return [
                     {
@@ -158,30 +180,8 @@ class BinanceExchange(ExchangeInterface):
                     }
                     for row in raw
                 ]
-            except ccxt.AuthenticationError as e:
-                raise ExchangeAuthError(f"Binance auth failed: {e}") from e
-            except ccxt.RateLimitExceeded as e:
-                # Check if this is a hard IP ban (418 / -1003 with "banned until")
-                banned_until_ms = parse_ban_timestamp_ms(str(e))
-                if banned_until_ms is not None:
-                    trip_circuit("binance", banned_until_ms)
-                    raise ExchangeBannedError(
-                        f"Binance IP banned: {e}",
-                        banned_until_ms=banned_until_ms,
-                    ) from e
-                raise ExchangeRateLimitError(
-                    f"Binance rate limit: {e}", retry_after_seconds=60.0
-                ) from e
-            except ccxt.NetworkError as e:
-                # CCXT sometimes wraps -1003 / 418 as a NetworkError. Detect it.
-                banned_until_ms = parse_ban_timestamp_ms(str(e))
-                if banned_until_ms is not None:
-                    trip_circuit("binance", banned_until_ms)
-                    raise ExchangeBannedError(
-                        f"Binance IP banned: {e}",
-                        banned_until_ms=banned_until_ms,
-                    ) from e
-                raise ExchangeConnectionError(f"Binance network error: {e}") from e
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
 
     def _record_rate_limit_headers(self) -> None:
         """Parse X-MBX-USED-WEIGHT-1M from the last CCXT response."""
@@ -197,38 +197,58 @@ class BinanceExchange(ExchangeInterface):
 
     async def get_server_time(self) -> datetime:
         """Return Binance server time as UTC-aware datetime."""
+        self._assert_circuit_closed()
         with start_span("exchange.get_server_time", {"exchange": "binance"}):
             try:
                 result = await self._client.fetch_time()
+                self._record_rate_limit_headers()
                 return datetime.fromtimestamp(result / 1000, tz=UTC)
-            except ccxt.NetworkError as e:
-                raise ExchangeConnectionError(f"Cannot reach Binance: {e}") from e
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
 
     async def fetch_balances(self) -> dict[str, Decimal]:
         """Return spot balances. Requires non-empty API key."""
+        self._assert_circuit_closed()
         try:
             result = await self._client.fetch_balance()
+            self._record_rate_limit_headers()
             return {
                 asset: Decimal(str(amount["total"]))
                 for asset, amount in result["total"].items()
                 if float(amount) > 0
             }
-        except ccxt.AuthenticationError as e:
-            raise ExchangeAuthError(f"Binance auth failed: {e}") from e
+        except Exception as e:
+            raise self._handle_ccxt_error(e) from e
 
     async def fetch_open_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
         """Return open orders. Stage 0: not yet implemented for live trading."""
-        return cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol))
+        self._assert_circuit_closed()
+        try:
+            result = cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol))
+            self._record_rate_limit_headers()
+            return result
+        except Exception as e:
+            raise self._handle_ccxt_error(e) from e
 
     async def fetch_trade_fees(self, symbol: str) -> dict[str, Decimal]:
-        fees = await self._client.fetch_trading_fee(symbol)
+        self._assert_circuit_closed()
+        try:
+            fees = await self._client.fetch_trading_fee(symbol)
+            self._record_rate_limit_headers()
+        except Exception as e:
+            raise self._handle_ccxt_error(e) from e
         return {
             "maker": Decimal(str(fees.get("maker", 0.001))),
             "taker": Decimal(str(fees.get("taker", 0.001))),
         }
 
     async def get_symbol_info(self, symbol: str) -> dict[str, Any]:
-        markets = await self._client.load_markets()
+        self._assert_circuit_closed()
+        try:
+            markets = await self._client.load_markets()
+            self._record_rate_limit_headers()
+        except Exception as e:
+            raise self._handle_ccxt_error(e) from e
         return cast(dict[str, Any], markets.get(symbol, {}))
 
     async def place_order(self, order: Any) -> dict[str, Any]:
@@ -238,12 +258,23 @@ class BinanceExchange(ExchangeInterface):
         raise NotImplementedError("Stage 0: order cancellation not yet enabled. See Stage 5.")
 
     async def health_check(self) -> bool:
-        """Verify Binance is reachable and (if configured) credentials are valid."""
+        """Verify Binance is reachable and (if configured) credentials are valid.
+
+        Returns False (without raising) if circuit is open — health_check is polled
+        frequently and we never want it to itself trigger ban-recovery noise.
+        """
+        if check_circuit("binance") > 0:
+            log.debug("binance_health_skipped_circuit_open")
+            return False
         try:
             await self._client.fetch_time()
+            self._record_rate_limit_headers()
             log.debug("binance_health_ok", testnet=self._testnet)
             return True
         except Exception as e:
+            # Trip the circuit if this exposed a ban (don't re-raise — health_check
+            # callers expect a bool return).
+            self._handle_ccxt_error(e)
             log.warning("binance_health_failed", error=str(e), testnet=self._testnet)
             return False
 

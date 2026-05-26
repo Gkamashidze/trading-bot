@@ -19,6 +19,11 @@ import time
 from dataclasses import dataclass
 
 from trading_bot.observability.logging import get_logger
+from trading_bot.observability.metrics import (
+    EXCHANGE_CIRCUIT_OPEN,
+    EXCHANGE_RATE_LIMIT_WEIGHT,
+    EXCHANGE_RATE_LIMIT_WEIGHT_PCT,
+)
 
 log = get_logger(__name__)
 
@@ -26,6 +31,8 @@ log = get_logger(__name__)
 # Binance spot weight limit per minute (default — overridden by /api/v3/exchangeInfo)
 _SPOT_WEIGHT_LIMIT_PER_MIN = 6000
 _SOFT_LIMIT_RATIO = 0.80  # back off at 80% of the limit
+_WARNING_RATIO = 0.70  # Telegram WARNING when we cross 70%
+_CRITICAL_RATIO = 0.90  # Telegram CRITICAL when we cross 90%
 _BAN_REGEX = re.compile(r"banned until (\d+)", re.IGNORECASE)
 
 
@@ -37,6 +44,8 @@ class CircuitState:
     last_weight_used: int = 0
     last_weight_updated_at: float = 0.0
     last_ban_alert_at: float = 0.0
+    last_weight_alert_at: float = 0.0
+    last_weight_alert_level: str = ""  # "", "warning", "critical"
 
 
 _circuits: dict[str, CircuitState] = {}
@@ -62,6 +71,7 @@ def trip_circuit(exchange_id: str, banned_until_ms: int) -> None:
     c = get_circuit(exchange_id)
     c.banned_until_ms = max(c.banned_until_ms, banned_until_ms)
     seconds_remaining = max(0, (banned_until_ms - int(time.time() * 1000)) // 1000)
+    EXCHANGE_CIRCUIT_OPEN.labels(exchange=exchange_id).set(1)
     log.error(
         "exchange_circuit_tripped",
         exchange=exchange_id,
@@ -80,6 +90,7 @@ def check_circuit(exchange_id: str) -> int:
     if remaining_ms <= 0:
         # Ban expired — reset
         c.banned_until_ms = 0
+        EXCHANGE_CIRCUIT_OPEN.labels(exchange=exchange_id).set(0)
         log.info("exchange_circuit_reset", exchange=exchange_id)
         return 0
     return remaining_ms // 1000
@@ -100,18 +111,71 @@ def should_alert_ban(exchange_id: str, dedup_window_s: int = 3600) -> bool:
 
 
 def record_weight(exchange_id: str, weight: int) -> None:
-    """Record the most recent X-MBX-USED-WEIGHT-1M header value."""
+    """Record the most recent X-MBX-USED-WEIGHT-1M header value.
+
+    Emits Prometheus gauges and a Telegram alert when crossing 70% / 90% thresholds
+    (deduped: at most one alert per level transition per 5 minutes).
+    """
     c = get_circuit(exchange_id)
     c.last_weight_used = weight
     c.last_weight_updated_at = time.time()
-    if weight > _SOFT_LIMIT_RATIO * _SPOT_WEIGHT_LIMIT_PER_MIN:
+
+    ratio = weight / _SPOT_WEIGHT_LIMIT_PER_MIN
+    EXCHANGE_RATE_LIMIT_WEIGHT.labels(exchange=exchange_id).set(weight)
+    EXCHANGE_RATE_LIMIT_WEIGHT_PCT.labels(exchange=exchange_id).set(ratio)
+
+    new_level = ""
+    if ratio >= _CRITICAL_RATIO:
+        new_level = "critical"
+    elif ratio >= _WARNING_RATIO:
+        new_level = "warning"
+
+    # Edge-triggered alert: only fire when we cross *into* a higher level,
+    # and not more than once per 5 minutes.
+    if new_level and new_level != c.last_weight_alert_level:
+        now = time.time()
+        if now - c.last_weight_alert_at >= 300:
+            c.last_weight_alert_at = now
+            c.last_weight_alert_level = new_level
+            _fire_weight_alert(exchange_id, weight, ratio, new_level)
+    elif not new_level and c.last_weight_alert_level:
+        # Returned to safe range — reset so the next breach alerts again
+        c.last_weight_alert_level = ""
+
+    if ratio > _SOFT_LIMIT_RATIO:
         log.warning(
             "exchange_rate_limit_approaching",
             exchange=exchange_id,
             weight=weight,
             limit=_SPOT_WEIGHT_LIMIT_PER_MIN,
-            ratio=f"{weight / _SPOT_WEIGHT_LIMIT_PER_MIN:.2f}",
+            ratio=f"{ratio:.2f}",
         )
+
+
+def _fire_weight_alert(exchange_id: str, weight: int, ratio: float, level: str) -> None:
+    """Send a fire-and-forget Telegram alert for a rate-limit threshold breach."""
+    try:
+        from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+        alerter = TelegramAlerter.from_env_optional()
+        if alerter is None:
+            return
+        alert_level = AlertLevel.CRITICAL if level == "critical" else AlertLevel.WARNING
+
+        detail = f"weight={weight}/{_SPOT_WEIGHT_LIMIT_PER_MIN} ({ratio:.1%}) — throttling REST"
+
+        async def _send() -> None:
+            await alerter.send(
+                alert_level,
+                f"exchange_rate_limit_{level}: {exchange_id}",
+                detail=detail,
+            )
+
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(_send())  # noqa: RUF006
+    except Exception as exc:
+        log.debug("rate_limit_alert_fire_failed", error=str(exc))
 
 
 def should_throttle(exchange_id: str) -> bool:
