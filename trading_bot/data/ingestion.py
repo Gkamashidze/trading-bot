@@ -27,7 +27,7 @@ from typing import Any, cast
 import pandas as pd
 
 from trading_bot.config import get_settings
-from trading_bot.core.exceptions import DataFetchError
+from trading_bot.core.exceptions import DataFetchError, ExchangeBannedError
 from trading_bot.core.models import DataLineage, ExchangeId
 from trading_bot.observability.logging import get_logger
 from trading_bot.observability.tracing import start_span
@@ -186,6 +186,10 @@ class OHLCVDownloader:
                 since=start,
                 limit=self._batch_size,
             )
+        except ExchangeBannedError:
+            # Pass through unchanged so the ingestion job can detect the ban
+            # and emit a single deduped WARNING instead of an ingestion ERROR.
+            raise
         except Exception as e:
             raise DataFetchError(
                 f"Failed to fetch OHLCV for {symbol} [{timeframe}] from {start}: {e}"

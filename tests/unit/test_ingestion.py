@@ -200,3 +200,26 @@ class TestOHLCVDownloader:
             mock_settings.return_value.storage.raw_path = str(tmp_path / "configured")
             downloader = OHLCVDownloader(exchange=mock_exchange)
             assert downloader._base_path == tmp_path / "configured"
+
+    @pytest.mark.asyncio
+    async def test_exchange_ban_passes_through(
+        self, downloader: OHLCVDownloader, mock_exchange: AsyncMock
+    ) -> None:
+        """ExchangeBannedError must NOT be wrapped in DataFetchError.
+
+        Regression test for the Binance 418 cascade — daily_ohlcv_ingestion_job
+        catches ExchangeBannedError specifically to emit a single deduped WARNING
+        instead of a per-symbol ERROR.
+        """
+        from trading_bot.core.exceptions import ExchangeBannedError
+
+        mock_exchange.fetch_ohlcv.side_effect = ExchangeBannedError(
+            "Binance IP banned", banned_until_ms=1_779_808_947_147
+        )
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        end = datetime(2024, 1, 2, tzinfo=UTC)
+
+        with pytest.raises(ExchangeBannedError) as exc_info:
+            await downloader.download(ExchangeId.BINANCE, "BTC/USDT", "1d", start, end)
+
+        assert exc_info.value.banned_until_ms == 1_779_808_947_147
