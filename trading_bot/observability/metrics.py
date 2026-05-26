@@ -80,6 +80,24 @@ STRATEGY_PNL = Gauge(
     labelnames=["strategy"],
 )
 
+EXCHANGE_RATE_LIMIT_WEIGHT = Gauge(
+    "trading_exchange_rate_limit_weight",
+    "Most recent X-MBX-USED-WEIGHT-1M (or equivalent) value reported by the exchange",
+    labelnames=["exchange"],
+)
+
+EXCHANGE_RATE_LIMIT_WEIGHT_PCT = Gauge(
+    "trading_exchange_rate_limit_weight_pct",
+    "Weight used as a fraction of the per-minute quota (0.70 = 70%)",
+    labelnames=["exchange"],
+)
+
+EXCHANGE_CIRCUIT_OPEN = Gauge(
+    "trading_exchange_circuit_open",
+    "1 if the exchange circuit is open (IP banned), 0 otherwise",
+    labelnames=["exchange"],
+)
+
 EVENT_BUS_QUEUE_DEPTH = Gauge(
     "trading_event_bus_queue_depth",
     "Number of events waiting in the bus queue",

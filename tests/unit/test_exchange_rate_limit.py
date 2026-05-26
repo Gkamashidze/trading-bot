@@ -85,3 +85,49 @@ class TestRateLimitAwareness:
         # 85% of 6000 = 5100 — over 80% threshold
         rate_limit.record_weight("binance", 5100)
         assert rate_limit.should_throttle("binance") is True
+
+
+class TestEdgeTriggeredWeightAlerts:
+    def test_no_alert_under_warning_threshold(self) -> None:
+        # 60% — below 70% warning threshold
+        rate_limit.record_weight("binance", 3600)
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == ""
+
+    def test_warning_alert_at_70_pct(self) -> None:
+        # 75% — above 70% warning threshold
+        rate_limit.record_weight("binance", 4500)
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == "warning"
+
+    def test_critical_alert_at_90_pct(self) -> None:
+        # 91% — above 90% critical threshold
+        rate_limit.record_weight("binance", 5460)
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == "critical"
+
+    def test_warning_then_critical_re_alerts(self) -> None:
+        # Start at warning level
+        rate_limit.record_weight("binance", 4500)
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == "warning"
+        # Force timestamp far in the past so the 5min dedup doesn't block us
+        rate_limit.get_circuit("binance").last_weight_alert_at = 0.0
+        # Escalate to critical — should re-alert (different level)
+        rate_limit.record_weight("binance", 5460)
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == "critical"
+
+    def test_alert_level_resets_when_back_under_warning(self) -> None:
+        rate_limit.record_weight("binance", 5460)  # critical
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == "critical"
+        rate_limit.record_weight("binance", 1000)  # back to safe
+        assert rate_limit.get_circuit("binance").last_weight_alert_level == ""
+
+    def test_repeated_warning_does_not_re_alert(self) -> None:
+        # First warning fires
+        rate_limit.record_weight("binance", 4500)
+        # Reset the timestamp tracker but keep the level — repeated warning shouldn't re-alert
+        c = rate_limit.get_circuit("binance")
+        first_alert_at = c.last_weight_alert_at
+        c.last_weight_alert_at = 0.0  # force "long ago" so dedup wouldn't block
+        rate_limit.record_weight("binance", 4600)  # still warning
+        # last_weight_alert_at should be unchanged (no new alert fired) because
+        # the LEVEL didn't change from "warning" to "critical"
+        assert c.last_weight_alert_at == 0.0
+        assert first_alert_at > 0  # sanity check on the first alert
