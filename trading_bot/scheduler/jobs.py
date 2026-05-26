@@ -169,12 +169,37 @@ async def daily_ohlcv_ingestion_job(
       - Gap-fill (data exists): end - 3 days (covers weekend gaps).
     Idempotent: deduplication ensures no duplicates.
     Failures are alerted to Telegram so silent data outages are visible.
+    Skip silently if the exchange has banned our IP (one alert per hour).
     """
     from datetime import timedelta
 
+    from trading_bot.core.exceptions import ExchangeBannedError
     from trading_bot.core.models import ExchangeId
     from trading_bot.data.ingestion import OHLCVDownloader
     from trading_bot.exchange import get_exchange
+    from trading_bot.exchange.rate_limit import check_circuit, should_alert_ban
+
+    # ── Skip if circuit is open (banned) ────────────────────────────────────
+    ban_seconds = check_circuit(exchange_id)
+    if ban_seconds > 0:
+        if should_alert_ban(exchange_id):
+            from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+            alerter = TelegramAlerter.from_env_optional()
+            if alerter:
+                await alerter.send(
+                    AlertLevel.WARNING,
+                    f"exchange_banned: {exchange_id}",
+                    detail=f"REST ingestion paused — IP ban for {ban_seconds // 60}min remaining",
+                )
+        log.warning(
+            "daily_ingestion_skipped_ban_active",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            ban_seconds_remaining=ban_seconds,
+        )
+        return
 
     log.info(
         "ohlcv_ingestion_started",
@@ -213,6 +238,27 @@ async def daily_ohlcv_ingestion_job(
             start=start,
             end=end,
         )
+    except ExchangeBannedError as exc:
+        # Ban detected mid-fetch — alert once and exit cleanly (no retry storm)
+        log.warning(
+            "ohlcv_ingestion_ban_detected",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            banned_until_ms=exc.banned_until_ms,
+        )
+        if should_alert_ban(exchange_id):
+            from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+            alerter = TelegramAlerter.from_env_optional()
+            if alerter:
+                ban_min = max(0, (exc.banned_until_ms - int(datetime.now(UTC).timestamp() * 1000)))
+                await alerter.send(
+                    AlertLevel.WARNING,
+                    f"exchange_banned: {exchange_id}",
+                    detail=f"IP ban detected — pausing REST ingestion ~{ban_min // 60_000}min",
+                )
+        return  # finally clause closes the exchange
     except Exception as e:
         log.error(
             "ohlcv_ingestion_failed",
@@ -473,6 +519,8 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
 
     settings = get_settings()
     crypto = settings.trading.crypto
+    # Stagger daily cron jobs across the 01:00 hour with a 5-minute jitter so
+    # symbol-1 and symbol-2 don't burst Binance with simultaneous requests.
     daily_minute_offset = 0
     for symbol in crypto.symbols:
         symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
@@ -500,6 +548,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                     trigger="cron",
                     hour=1,
                     minute=daily_minute_offset,
+                    jitter=300,  # +/- 5 min so symbols don't burst at exactly :00
                     id=job_id,
                     name=f"Daily {symbol} {timeframe} ingestion",
                     replace_existing=True,
@@ -520,6 +569,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                 trigger="cron",
                 hour=1,
                 minute=equity_minute_offset,
+                jitter=300,  # +/- 5 min so symbols don't burst at exactly :30
                 id=job_id,
                 name=f"Daily {symbol} {timeframe} ingestion (alpaca)",
                 replace_existing=True,
@@ -551,7 +601,6 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
     )
 
-    settings = get_settings()
     if settings.market_context.enabled:
         scheduler.add_job(
             market_context_refresh_job,

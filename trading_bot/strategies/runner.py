@@ -236,11 +236,28 @@ def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[St
     return adjusted
 
 
+# In-memory dedup window for stale-data alerts (one alert per symbol per hour)
+_stale_alert_dedup: dict[str, float] = {}
+_STALE_ALERT_DEDUP_SECONDS = 3600.0
+
+
 def _send_stale_data_alert(symbol: str, detail: str) -> None:
-    """Fire a Telegram alert when data is stale (non-blocking, best-effort)."""
+    """Fire a Telegram alert when data is stale (non-blocking, best-effort).
+
+    Dedupes to one alert per symbol per hour. Stale data is a symptom of a
+    deeper problem (ban, ingestion outage) — repeating it every 15 min spams
+    the operator without adding signal.
+    """
     import asyncio
+    import time as _time
 
     from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+    now = _time.time()
+    last = _stale_alert_dedup.get(symbol, 0.0)
+    if now - last < _STALE_ALERT_DEDUP_SECONDS:
+        return
+    _stale_alert_dedup[symbol] = now
 
     alerter = TelegramAlerter.from_env_optional()
     if alerter is None:
@@ -248,7 +265,7 @@ def _send_stale_data_alert(symbol: str, detail: str) -> None:
 
     async def _send() -> None:
         await alerter.send(
-            AlertLevel.ERROR,
+            AlertLevel.WARNING,
             f"Stale data — signal skipped: {symbol}",
             detail=detail[:400],
         )
