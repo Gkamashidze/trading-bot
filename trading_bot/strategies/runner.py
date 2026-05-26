@@ -40,6 +40,11 @@ for _s in _STRATEGIES:
 _last_results: list[StrategyResult] = []
 _last_computed_at: datetime | None = None
 
+_STRATEGY_FLAGS = {
+    "sma_crossover": "strategy_sma_enabled",
+    "rsi_mean_reversion": "strategy_rsi_enabled",
+}
+
 
 def get_latest_signals() -> list[StrategyResult]:
     """Return the most recently computed strategy results (may be empty list)."""
@@ -98,7 +103,23 @@ async def refresh_signals() -> list[StrategyResult]:
     ctx = get_market_context()
     all_results: list[StrategyResult] = []
 
+    from trading_bot.asset_universe import get_asset_registry
+    from trading_bot.feature_flags import is_enabled
+
+    registry = get_asset_registry()
+
     for symbol in crypto.symbols:
+        spec = registry.get(symbol)
+        if spec is None or not registry.is_data_eligible(symbol):
+            log.info("signal_refresh_skipped_asset_disabled", symbol=symbol)
+            continue
+        if spec.feature_flag and not await is_enabled(spec.feature_flag):
+            log.info(
+                "signal_refresh_skipped_asset_flag",
+                symbol=symbol,
+                feature_flag=spec.feature_flag,
+            )
+            continue
         bars = _load_bars(exchange=crypto.exchange, symbol=symbol, timeframe=crypto.timeframes[0])
         if bars is None or bars.empty:
             log.warning("signal_refresh_skipped", symbol=symbol, reason="no bars available")
@@ -121,6 +142,21 @@ async def refresh_signals() -> list[StrategyResult]:
             continue
 
         for strategy in _STRATEGIES:
+            flag_name = _STRATEGY_FLAGS.get(strategy.strategy_id)
+            if flag_name and not await is_enabled(flag_name):
+                log.debug(
+                    "strategy_skipped_feature_flag",
+                    strategy=strategy.strategy_id,
+                    flag=flag_name,
+                )
+                continue
+            if spec.enabled_strategies and strategy.strategy_id not in spec.enabled_strategies:
+                log.debug(
+                    "strategy_skipped_asset_allowlist",
+                    symbol=symbol,
+                    strategy=strategy.strategy_id,
+                )
+                continue
             try:
                 result = strategy.compute(bars)
                 result = result.model_copy(update={"symbol": symbol})

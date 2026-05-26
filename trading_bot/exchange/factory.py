@@ -29,7 +29,19 @@ def get_exchange(exchange_id: ExchangeId | str) -> ExchangeInterface:
             retry_backoff_base=settings.binance.retry_backoff_base,
         )
 
+    if exchange_id == ExchangeId.ALPACA:
+        from trading_bot.exchange.alpaca import AlpacaExchange
+
+        return AlpacaExchange(
+            api_key=settings.alpaca.api_key,
+            secret_key=settings.alpaca.secret_key,
+            paper=settings.alpaca.paper,
+            allowed_symbols=frozenset(settings.alpaca.allowed_etf_symbols),
+            trading_base_url=settings.alpaca.base_url,
+            allow_live_trading=settings.alpaca.allow_live_trading,
+        )
+
     raise NotImplementedError(
         f"Exchange adapter for '{exchange_id}' is not yet implemented. "
-        "See the roadmap: Alpaca → Stage 5, Coinbase → Stage 5b."
+        "See the roadmap: Coinbase → Stage 5b."
     )

@@ -292,15 +292,16 @@ class TestProductionRegistry:
         over = [a.symbol for a in reg.assets if a.max_capital_pct > 0.50]
         assert over == [], f"Assets exceeding 50% cap: {over}"
 
-    def test_all_etf_assets_are_disabled(self) -> None:
-        """ETFs must remain disabled until Alpaca Stage 5 integration is complete."""
+    def test_future_wave_etfs_are_disabled(self) -> None:
+        """IWM, TLT, GLD must remain disabled — not yet approved for Wave 1."""
         reg = get_asset_registry()
-        active_etfs = [
-            a.symbol
-            for a in reg.assets
-            if a.asset_class == AssetClass.ETF and a.status != AssetStatus.DISABLED
-        ]
-        assert active_etfs == [], f"ETFs not disabled: {active_etfs}"
+        future_wave = {"IWM", "TLT", "GLD"}
+        for sym in future_wave:
+            spec = reg.get(sym)
+            assert spec is not None, f"{sym} missing from registry"
+            assert spec.status == AssetStatus.DISABLED, (
+                f"{sym} must be disabled (future wave), got {spec.status}"
+            )
 
     def test_all_etf_assets_use_alpaca_venue(self) -> None:
         reg = get_asset_registry()
@@ -339,10 +340,23 @@ class TestProductionRegistry:
 
     def test_expected_etf_symbols_present(self) -> None:
         reg = get_asset_registry()
-        expected = {"SPY", "QQQ", "SOXX", "IWM", "TLT", "GLD"}
+        expected = {"SPY", "QQQ", "SOXX", "IWM", "TLT", "GLD", "IBIT"}
         registered = {a.symbol for a in reg.assets}
         missing = expected - registered
         assert missing == set(), f"Expected ETF symbols missing: {missing}"
+
+    def test_ibit_cap_at_most_15_pct(self) -> None:
+        """IBIT hard-capped at 10% due to BTC/USDT overlap concentration risk."""
+        reg = get_asset_registry()
+        ibit = reg.get("IBIT")
+        assert ibit is not None, "IBIT missing from registry"
+        assert ibit.max_capital_pct <= 0.15, (
+            f"IBIT cap {ibit.max_capital_pct:.0%} exceeds 15% BTC-overlap ceiling"
+        )
+        assert ibit.venue == ExchangeId.ALPACA
+        assert ibit.asset_class == AssetClass.ETF
+        # IBIT is Wave 1 approved — research status (not disabled)
+        assert ibit.status == AssetStatus.RESEARCH
 
     def test_expected_crypto_symbols_present(self) -> None:
         reg = get_asset_registry()
@@ -366,3 +380,116 @@ class TestProductionRegistry:
             a.symbol for a in reg.by_status(AssetStatus.PAPER) if not a.enabled_strategies
         ]
         assert paper_no_strategy == [], f"Paper assets with no strategies: {paper_no_strategy}"
+
+
+# ---------------------------------------------------------------------------
+# ETF Wave 1 — narrower flag, approved symbols only
+# ---------------------------------------------------------------------------
+
+_WAVE1_SYMBOLS = {"SPY", "QQQ", "SOXX", "IBIT"}
+_FUTURE_WAVE_SYMBOLS = {"IWM", "TLT", "GLD"}
+
+
+class TestEtfWave1:
+    """Invariants for the approved Wave 1 ETF activation."""
+
+    def test_wave1_symbols_are_research_status(self) -> None:
+        """Wave 1 ETFs must be at research status — data ingestion active, not yet tradeable."""
+        reg = get_asset_registry()
+        for sym in _WAVE1_SYMBOLS:
+            spec = reg.get(sym)
+            assert spec is not None, f"{sym} missing from registry"
+            assert spec.status == AssetStatus.RESEARCH, (
+                f"{sym} expected research, got {spec.status}"
+            )
+
+    def test_wave1_symbols_use_wave1_flag(self) -> None:
+        reg = get_asset_registry()
+        for sym in _WAVE1_SYMBOLS:
+            spec = reg.get(sym)
+            assert spec is not None
+            assert spec.feature_flag == "asset_group_etf_wave1_enabled", (
+                f"{sym} has flag {spec.feature_flag!r}, expected asset_group_etf_wave1_enabled"
+            )
+
+    def test_future_wave_symbols_are_disabled(self) -> None:
+        """IWM, TLT, GLD must remain disabled — not approved for Wave 1."""
+        reg = get_asset_registry()
+        for sym in _FUTURE_WAVE_SYMBOLS:
+            spec = reg.get(sym)
+            assert spec is not None, f"{sym} missing from registry"
+            assert spec.status == AssetStatus.DISABLED, f"{sym} must be disabled, got {spec.status}"
+
+    def test_future_wave_symbols_use_phase5_flag(self) -> None:
+        reg = get_asset_registry()
+        for sym in _FUTURE_WAVE_SYMBOLS:
+            spec = reg.get(sym)
+            assert spec is not None
+            assert spec.feature_flag == "asset_group_etf_phase5_enabled", (
+                f"{sym} has flag {spec.feature_flag!r}, expected asset_group_etf_phase5_enabled"
+            )
+
+    def test_wave1_etfs_are_data_eligible(self) -> None:
+        """research status means OHLCV ingestion is permitted."""
+        reg = get_asset_registry()
+        for sym in _WAVE1_SYMBOLS:
+            assert reg.is_data_eligible(sym), f"{sym} must be data-eligible (research)"
+
+    def test_wave1_etfs_are_not_tradeable(self) -> None:
+        """research (not paper) status — paper orders must not fire yet."""
+        reg = get_asset_registry()
+        for sym in _WAVE1_SYMBOLS:
+            assert not reg.is_tradeable(sym), f"{sym} must not be tradeable at research status"
+
+    def test_future_wave_etfs_are_not_data_eligible(self) -> None:
+        reg = get_asset_registry()
+        for sym in _FUTURE_WAVE_SYMBOLS:
+            assert not reg.is_data_eligible(sym), f"{sym} must not be data-eligible while disabled"
+
+    def test_ibit_is_etf_not_crypto(self) -> None:
+        """IBIT is the iShares Bitcoin Trust ETF — US equity venue, not crypto."""
+        reg = get_asset_registry()
+        ibit = reg.get("IBIT")
+        assert ibit is not None
+        assert ibit.asset_class == AssetClass.ETF
+        assert ibit.venue == ExchangeId.ALPACA
+        assert ibit.asset_class != AssetClass.CRYPTO
+
+    def test_wave1_etfs_have_sma_strategy(self) -> None:
+        reg = get_asset_registry()
+        for sym in _WAVE1_SYMBOLS:
+            spec = reg.get(sym)
+            assert spec is not None
+            assert "sma_crossover" in spec.enabled_strategies, (
+                f"{sym} missing sma_crossover strategy"
+            )
+
+    def test_wave1_does_not_affect_future_wave(self) -> None:
+        """Enabling Wave 1 flag must not activate IWM/TLT/GLD."""
+        reg = get_asset_registry()
+        # Even if asset_group_etf_wave1_enabled=true, future wave must stay disabled
+        future_active = [
+            a.symbol
+            for a in reg.assets
+            if a.symbol in _FUTURE_WAVE_SYMBOLS and a.status != AssetStatus.DISABLED
+        ]
+        assert future_active == [], f"Future wave ETFs incorrectly active: {future_active}"
+
+    def test_live_trading_flag_is_not_in_wave1_flag_name(self) -> None:
+        """Sanity: the Wave 1 flag must not reference live trading."""
+        assert "live" not in "asset_group_etf_wave1_enabled"
+
+    def test_no_live_candidates_after_wave1(self) -> None:
+        """Wave 1 activation must not promote any asset to live_candidate."""
+        reg = get_asset_registry()
+        live = [a.symbol for a in reg.assets if a.status == AssetStatus.LIVE_CANDIDATE]
+        assert live == [], f"Unexpected live_candidates: {live}"
+
+    def test_wave1_etfs_on_alpaca_venue(self) -> None:
+        reg = get_asset_registry()
+        for sym in _WAVE1_SYMBOLS:
+            spec = reg.get(sym)
+            assert spec is not None
+            assert spec.venue == ExchangeId.ALPACA, (
+                f"{sym} must be on Alpaca venue, got {spec.venue}"
+            )

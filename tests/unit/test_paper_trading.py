@@ -188,6 +188,14 @@ class TestPortfolioManager:
         assert pos.quantity == Decimal("0.1")
         assert pos.average_cost == Decimal("50000")
 
+    def test_partial_buy_uses_filled_quantity(self) -> None:
+        pm = self._manager()
+        order = _buy_order(quantity=0.1)
+        pm.apply_fill(order, Decimal("50000"), filled_quantity=Decimal("0.04"))
+        snap = pm.get_snapshot()
+        assert len(snap.positions) == 1
+        assert snap.positions[0].quantity == Decimal("0.04")
+
     def test_buy_deducts_cash_with_fee(self) -> None:
         pm = self._manager(capital=10_000.0)
         order = _buy_order(quantity=0.1)
@@ -343,7 +351,8 @@ class TestPaperExchange:
         fill = Decimal(result["fill_price"])
         # BUY → price + slippage (0.05%) → > $50000
         assert fill > Decimal("50000")
-        assert result["status"] == "filled"
+        # Partial fill is valid — assert order executed (not rejected)
+        assert result["status"] in ("filled", "partially_filled")
 
     @pytest.mark.asyncio
     async def test_place_order_no_price_raises(self) -> None:

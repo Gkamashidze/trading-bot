@@ -51,9 +51,19 @@ class PortfolioManager:
         order: OrderRequest,
         fill_price: Decimal,
         fee_rate: Decimal = Decimal("0.001"),
+        filled_quantity: Decimal | None = None,
     ) -> None:
         sym = order.symbol
-        qty = order.quantity
+        qty = filled_quantity if filled_quantity is not None else order.quantity
+        if qty <= 0:
+            log.warning(
+                "paper_fill_ignored_zero_quantity",
+                symbol=sym,
+                side=order.side,
+                requested_quantity=str(order.quantity),
+                filled_quantity=str(qty),
+            )
+            return
 
         if order.side == OrderSide.BUY:
             cost = qty * fill_price * (1 + fee_rate)

@@ -58,6 +58,7 @@ class TestRefreshSignalsStaleData:
             patch("trading_bot.execution.router.route_signals", new=AsyncMock()),
             patch("trading_bot.strategies.runner._send_stale_data_alert") as mock_alert,
             patch("trading_bot.strategies.runner.get_settings", return_value=_mock_settings()),
+            patch("trading_bot.feature_flags.is_enabled", new=AsyncMock(return_value=True)),
         ):
             mock_monitor.check_freshness.side_effect = DataStalenessError("stale")
 
@@ -88,6 +89,7 @@ class TestRefreshSignalsStaleData:
             patch("trading_bot.strategies.runner._STRATEGIES", [mock_strategy]),
             patch("trading_bot.execution.router.route_signals", new=AsyncMock()),
             patch("trading_bot.strategies.runner.get_settings", return_value=_mock_settings()),
+            patch("trading_bot.feature_flags.is_enabled", new=AsyncMock(return_value=True)),
         ):
             mock_monitor.check_freshness.return_value = None
             results = await refresh_signals()
@@ -118,6 +120,7 @@ class TestRefreshSignalsStaleData:
             patch("trading_bot.execution.router.route_signals", new=route_mock),
             patch("trading_bot.strategies.runner.get_market_context", return_value=None),
             patch("trading_bot.strategies.runner.get_settings", return_value=_mock_settings()),
+            patch("trading_bot.feature_flags.is_enabled", new=AsyncMock(return_value=True)),
         ):
             mock_monitor.check_freshness.return_value = None
             results = await refresh_signals()
@@ -134,7 +137,36 @@ class TestRefreshSignalsStaleData:
             patch("trading_bot.strategies.runner._load_bars", return_value=None),
             patch("trading_bot.execution.router.route_signals", new=route_mock),
             patch("trading_bot.strategies.runner.get_settings", return_value=_mock_settings()),
+            patch("trading_bot.feature_flags.is_enabled", new=AsyncMock(return_value=True)),
         ):
             results = await refresh_signals()
 
         assert results == []
+
+    async def test_strategy_flag_disabled_skips_strategy(self) -> None:
+        from trading_bot.strategies.runner import refresh_signals
+
+        fresh_bars = _make_bars(stale=False)
+        mock_strategy = MagicMock(
+            strategy_id="sma_crossover",
+            compute=MagicMock(),
+        )
+        route_mock = AsyncMock()
+
+        async def _flag(name: str) -> bool:
+            return name != "strategy_sma_enabled"
+
+        with (
+            patch("trading_bot.strategies.runner._load_bars", return_value=fresh_bars),
+            patch("trading_bot.strategies.runner._freshness_monitor") as mock_monitor,
+            patch("trading_bot.strategies.runner._STRATEGIES", [mock_strategy]),
+            patch("trading_bot.execution.router.route_signals", new=route_mock),
+            patch("trading_bot.strategies.runner.get_settings", return_value=_mock_settings()),
+            patch("trading_bot.feature_flags.is_enabled", new=AsyncMock(side_effect=_flag)),
+        ):
+            mock_monitor.check_freshness.return_value = None
+            results = await refresh_signals()
+
+        assert results == []
+        mock_strategy.compute.assert_not_called()
+        route_mock.assert_called_once_with([])

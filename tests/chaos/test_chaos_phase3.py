@@ -129,7 +129,7 @@ class TestLineageCorruption:
 
     def test_verify_snapshot_detects_mismatch(self) -> None:
         """Corrupted lineage should raise SnapshotMismatchError."""
-        store = LineageStore()
+        store = LineageStore(persist_path=None)
         lineage = self._make_lineage()
         snapshot_id = store.create_snapshot(lineage)
 
@@ -154,14 +154,14 @@ class TestLineageCorruption:
             store.verify_snapshot(snapshot_id, tampered)
 
     def test_verify_unknown_snapshot_raises_keyerror(self) -> None:
-        store = LineageStore()
+        store = LineageStore(persist_path=None)
         lineage = self._make_lineage()
         with pytest.raises(KeyError):
             store.verify_snapshot("nonexistent_id", lineage)
 
     def test_duplicate_create_is_idempotent(self) -> None:
         """Registering the same lineage twice returns the same ID."""
-        store = LineageStore()
+        store = LineageStore(persist_path=None)
         lineage = self._make_lineage()
         id1 = store.create_snapshot(lineage)
         id2 = store.create_snapshot(lineage)

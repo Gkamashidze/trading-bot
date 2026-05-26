@@ -197,10 +197,11 @@ class OHLCVDownloader:
 
         # Convert to DataFrame
         df = pd.DataFrame(raw_bars)
+        source = f"{exchange_id.value}.fetch_ohlcv"
         df["symbol"] = symbol
         df["exchange"] = str(exchange_id)
         df["timeframe"] = timeframe
-        df["source"] = "binance.fetch_ohlcv"
+        df["source"] = source
         df["schema_version"] = _SCHEMA_VERSION
         df["fetched_at"] = fetched_at
 
@@ -224,10 +225,15 @@ class OHLCVDownloader:
 
         # Write lineage
         lineage = DataLineage(
-            source=f"binance.fetch_ohlcv:{symbol}:{timeframe}",
+            source=f"{source}:{symbol}:{timeframe}",
             fetched_at=fetched_at,
             row_count=len(df),
             schema_version=_SCHEMA_VERSION,
+            provider=exchange_id.value,
+            exchange=exchange_id.value,
+            symbol=symbol,
+            timeframe=timeframe,
+            storage_path=str(parquet_path.parent),
         )
         self._lineage_path(parquet_path).write_text(
             json.dumps(lineage.model_dump(mode="json"), indent=2, default=str)

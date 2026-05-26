@@ -16,41 +16,34 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.3.0",
     "python-dotenv>=1.0.1",
-
     # ── Data & Numerics ───────────────────────────────────────────────────
     "pandas>=2.2.2",
     "numpy>=1.26.4",
     "pyarrow>=16.1.0",          # Parquet read/write
     "pandera>=0.19.3",          # DataFrame schema validation
     "duckdb>=0.10.3",           # OLAP analytics
-
     # ── Market Data & Exchange ────────────────────────────────────────────
     "ccxt>=4.3.0",
     "yfinance>=0.2.40",
     "pandas-market-calendars>=4.4.1",
-
+    "alpaca-py>=0.23.0",             # Alpaca ETF/equity paper + live trading
     # ── Async / HTTP ──────────────────────────────────────────────────────
     "aiohttp>=3.9.5",
     "httpx>=0.27.0",
     "websockets>=12.0",
     "orjson>=3.10.3",           # fast JSON hot path
-
     # ── Database ──────────────────────────────────────────────────────────
     "asyncpg>=0.29.0",
     "alembic>=1.13.1",
     "sqlalchemy>=2.0.30",       # alembic dependency + ORM-free typing
-
     # ── Dashboard & HTTP ──────────────────────────────────────────────────
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
     "jinja2>=3.1.4",
-
     # ── Scheduling ────────────────────────────────────────────────────────
     "apscheduler>=3.10.4",
-
     # ── Resilience ────────────────────────────────────────────────────────
     "tenacity>=8.3.0",
-
     # ── Logging & Observability ───────────────────────────────────────────
     "structlog>=24.1.0",
     "opentelemetry-sdk>=1.24.0",
@@ -58,10 +51,8 @@ dependencies = [
     "opentelemetry-instrumentation-asyncpg>=0.45b0",
     "opentelemetry-instrumentation-aiohttp-client>=0.45b0",
     "prometheus-client>=0.20.0",
-
     # ── Feature flags ─────────────────────────────────────────────────────
     "cachetools>=5.3.3",
-
     # ── Idempotency ───────────────────────────────────────────────────────
     "uuid-utils>=0.9.0",        # UUID v7 (time-ordered)
 ]
@@ -113,8 +104,9 @@ research = [
 ]
 
 [project.scripts]
-trading-bot = "trading_bot.main:main"
-verify-env   = "scripts.verify_environment:main"
+trading-bot     = "trading_bot.main:main"
+trading-bot-etf = "trading_bot.cli:main"
+verify-env      = "scripts.verify_environment:main"
 
 # ── Tool configuration ────────────────────────────────────────────────────
 
@@ -149,6 +141,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "T20"]
 "scripts/**" = ["T20", "S603", "S607"]
+"trading_bot/cli/**" = ["T20"]
 "trading_bot/database/migrations/**" = ["E501"]
 "trading_bot/notebooks/**" = ["ALL"]
 
@@ -180,6 +173,8 @@ module = [
     "apscheduler.*",
     "vectorbt.*",
     "backtrader.*",
+    "alpaca.*",
+    "sseclient.*",
 ]
 ignore_missing_imports = true
 
@@ -200,6 +195,7 @@ markers = [
     "contract: exchange API contract tests (schemathesis)",
     "chaos: chaos engineering tests",
     "slow: tests that take > 10 seconds",
+    "paper_execution: Alpaca paper execution tests — requires --paper-execution-test flag",
 ]
 
 [tool.coverage.run]

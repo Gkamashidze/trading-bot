@@ -195,3 +195,54 @@ class TestRouterIdempotencyKey:
         key_sma = idempotency_key_for_order("sma_crossover", "BTC/USDT", "buy", today)
         key_rsi = idempotency_key_for_order("rsi_mean_reversion", "BTC/USDT", "buy", today)
         assert key_sma != key_rsi
+
+
+class TestRouterPartialFill:
+    async def test_partial_fill_records_partial_status_and_filled_quantity(self) -> None:
+        from trading_bot.execution.router import _last_signal, route_signal
+        from trading_bot.risk.engine import RiskDecision
+
+        _last_signal.clear()
+
+        with (
+            patch("trading_bot.feature_flags.is_enabled", new=AsyncMock(return_value=True)),
+            patch("trading_bot.safety.circuit_breaker.get_circuit_breaker") as mock_cb,
+            patch("trading_bot.execution.router._risk") as mock_risk,
+            patch("trading_bot.execution.router._exchange") as mock_exchange,
+            patch("trading_bot.execution.router._asset_is_tradeable", return_value=True),
+            patch("trading_bot.websocket.price_cache.get_price_cache") as mock_cache,
+            patch("trading_bot.idempotency.decorator._default_store", None),
+        ):
+            mock_cb.return_value.is_trading_allowed.return_value = True
+            mock_risk.pre_trade_check.return_value = RiskDecision(
+                approved=True,
+                reason="ok",
+                tier=0,
+            )
+            mock_exchange.place_order = AsyncMock(
+                return_value={
+                    "exchange_order_id": "PAPER-1",
+                    "fill_price": "50000",
+                    "filled_quantity": "0.04",
+                    "status": "partially_filled",
+                }
+            )
+            mock_tick = MagicMock()
+            mock_tick.price = Decimal("50000")
+            mock_cache.return_value.get.return_value = mock_tick
+
+            tracker = MagicMock()
+            portfolio = MagicMock()
+            portfolio.get_snapshot.return_value = _snapshot()
+
+            with (
+                patch("trading_bot.execution.router.get_order_tracker", return_value=tracker),
+                patch("trading_bot.execution.router.get_portfolio_manager", return_value=portfolio),
+            ):
+                await route_signal(_result(signal="BUY"))
+
+        portfolio.apply_fill.assert_called_once()
+        assert portfolio.apply_fill.call_args.kwargs["filled_quantity"] == Decimal("0.04")
+        order_state = tracker.record.call_args[0][0]
+        assert order_state.status == OrderStatus.PARTIALLY_FILLED
+        assert order_state.filled_quantity == Decimal("0.04")
