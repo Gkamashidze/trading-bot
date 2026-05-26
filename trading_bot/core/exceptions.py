@@ -79,6 +79,14 @@ class ExchangeRateLimitError(ExchangeError):
         self.retry_after_seconds = retry_after_seconds
 
 
+class ExchangeBannedError(ExchangeError):
+    """Exchange has banned our IP. Wait until banned_until_ms before retrying."""
+
+    def __init__(self, message: str, banned_until_ms: int) -> None:
+        super().__init__(message)
+        self.banned_until_ms = banned_until_ms
+
+
 class ExchangeOrderError(ExchangeError):
     """Order submission / management failed."""
 

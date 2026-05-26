@@ -100,12 +100,37 @@ async def daily_ohlcv_ingestion_job(
 
     Idempotent: safe to run multiple times — deduplication ensures no duplicates.
     Retry: up to 4 attempts with exponential backoff + jitter.
+    Skip silently if the exchange has banned our IP (one alert per hour).
     """
     from datetime import timedelta
 
+    from trading_bot.core.exceptions import ExchangeBannedError
     from trading_bot.core.models import ExchangeId
     from trading_bot.data.ingestion import OHLCVDownloader
     from trading_bot.exchange import get_exchange
+    from trading_bot.exchange.rate_limit import check_circuit, should_alert_ban
+
+    # ── Skip if circuit is open (banned) ────────────────────────────────────
+    ban_seconds = check_circuit(exchange_id)
+    if ban_seconds > 0:
+        if should_alert_ban(exchange_id):
+            from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+            alerter = TelegramAlerter.from_env_optional()
+            if alerter:
+                await alerter.send(
+                    AlertLevel.WARNING,
+                    f"exchange_banned: {exchange_id}",
+                    detail=f"REST ingestion paused — IP ban for {ban_seconds // 60}min remaining",
+                )
+        log.warning(
+            "daily_ingestion_skipped_ban_active",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            ban_seconds_remaining=ban_seconds,
+        )
+        return
 
     log.info(
         "daily_ingestion_started",
@@ -121,13 +146,36 @@ async def daily_ohlcv_ingestion_job(
     exchange = get_exchange(ExchangeId(exchange_id))
     downloader = OHLCVDownloader(exchange=exchange)
 
-    bars = await downloader.download(
-        exchange_id=ExchangeId(exchange_id),
-        symbol=symbol,
-        timeframe=timeframe,
-        start=start,
-        end=end,
-    )
+    try:
+        bars = await downloader.download(
+            exchange_id=ExchangeId(exchange_id),
+            symbol=symbol,
+            timeframe=timeframe,
+            start=start,
+            end=end,
+        )
+    except ExchangeBannedError as exc:
+        # Ban detected mid-fetch — alert once and exit cleanly (no retry storm)
+        log.warning(
+            "daily_ingestion_ban_detected",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            banned_until_ms=exc.banned_until_ms,
+        )
+        if should_alert_ban(exchange_id):
+            from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+            alerter = TelegramAlerter.from_env_optional()
+            if alerter:
+                ban_min = max(0, (exc.banned_until_ms - int(datetime.now(UTC).timestamp() * 1000)))
+                await alerter.send(
+                    AlertLevel.WARNING,
+                    f"exchange_banned: {exchange_id}",
+                    detail=f"IP ban detected — pausing REST ingestion ~{ban_min // 60_000}min",
+                )
+        await exchange.close()  # type: ignore[attr-defined]
+        return
 
     await exchange.close()  # type: ignore[attr-defined]
 
@@ -347,6 +395,8 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     from trading_bot.config import get_settings
 
     crypto = get_settings().trading.crypto
+    # Stagger ingestion jobs across the 01:00 hour with a 5-minute jitter so
+    # symbol-1 and symbol-2 don't burst Binance with simultaneous requests.
     minute_offset = 0
     for symbol in crypto.symbols:
         symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
@@ -357,6 +407,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                 trigger="cron",
                 hour=1,
                 minute=minute_offset,
+                jitter=300,  # +/- 5 min randomness so retries don't synchronise
                 id=job_id,
                 name=f"Daily {symbol} {timeframe} ingestion",
                 replace_existing=True,

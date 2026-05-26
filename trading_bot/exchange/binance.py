@@ -15,6 +15,7 @@ Key rotation: every 90 days. Set calendar reminder.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
@@ -30,8 +31,16 @@ from tenacity import (
 from trading_bot.core.contracts import ExchangeInterface
 from trading_bot.core.exceptions import (
     ExchangeAuthError,
+    ExchangeBannedError,
     ExchangeConnectionError,
     ExchangeRateLimitError,
+)
+from trading_bot.exchange.rate_limit import (
+    check_circuit,
+    cooldown_if_needed,
+    parse_ban_timestamp_ms,
+    record_weight,
+    trip_circuit,
 )
 from trading_bot.observability.logging import get_logger
 from trading_bot.observability.metrics import API_LATENCY
@@ -104,6 +113,17 @@ class BinanceExchange(ExchangeInterface):
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         """Fetch OHLCV bars from Binance. Returns raw CCXT format."""
+        # ── Circuit breaker: skip if Binance has banned our IP ───────────────
+        ban_seconds_remaining = check_circuit("binance")
+        if ban_seconds_remaining > 0:
+            raise ExchangeBannedError(
+                f"Binance IP ban active — {ban_seconds_remaining}s remaining",
+                banned_until_ms=int(time.time() * 1000) + ban_seconds_remaining * 1000,
+            )
+
+        # ── Preemptive throttle: if approaching weight limit, slow down ──────
+        await cooldown_if_needed("binance", seconds=60)
+
         since_ms: int | None = None
         if since is not None:
             since_ms = int(since.timestamp() * 1000)
@@ -119,6 +139,8 @@ class BinanceExchange(ExchangeInterface):
                 raw = await self._client.fetch_ohlcv(
                     symbol, timeframe=timeframe, since=since_ms, limit=limit
                 )
+                # Record rate-limit header for preemptive throttling
+                self._record_rate_limit_headers()
                 return [
                     {
                         "open_time": datetime.fromtimestamp(row[0] / 1000, tz=UTC),
@@ -139,11 +161,39 @@ class BinanceExchange(ExchangeInterface):
             except ccxt.AuthenticationError as e:
                 raise ExchangeAuthError(f"Binance auth failed: {e}") from e
             except ccxt.RateLimitExceeded as e:
+                # Check if this is a hard IP ban (418 / -1003 with "banned until")
+                banned_until_ms = parse_ban_timestamp_ms(str(e))
+                if banned_until_ms is not None:
+                    trip_circuit("binance", banned_until_ms)
+                    raise ExchangeBannedError(
+                        f"Binance IP banned: {e}",
+                        banned_until_ms=banned_until_ms,
+                    ) from e
                 raise ExchangeRateLimitError(
                     f"Binance rate limit: {e}", retry_after_seconds=60.0
                 ) from e
             except ccxt.NetworkError as e:
+                # CCXT sometimes wraps -1003 / 418 as a NetworkError. Detect it.
+                banned_until_ms = parse_ban_timestamp_ms(str(e))
+                if banned_until_ms is not None:
+                    trip_circuit("binance", banned_until_ms)
+                    raise ExchangeBannedError(
+                        f"Binance IP banned: {e}",
+                        banned_until_ms=banned_until_ms,
+                    ) from e
                 raise ExchangeConnectionError(f"Binance network error: {e}") from e
+
+    def _record_rate_limit_headers(self) -> None:
+        """Parse X-MBX-USED-WEIGHT-1M from the last CCXT response."""
+        try:
+            headers = getattr(self._client, "last_response_headers", None)
+            if not headers:
+                return
+            weight_str = headers.get("X-MBX-USED-WEIGHT-1M") or headers.get("x-mbx-used-weight-1m")
+            if weight_str:
+                record_weight("binance", int(weight_str))
+        except Exception as exc:
+            log.debug("rate_limit_header_parse_failed", error=str(exc))
 
     async def get_server_time(self) -> datetime:
         """Return Binance server time as UTC-aware datetime."""
