@@ -8,6 +8,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent repeated Binance IP bans by serializing REST calls, honoring `429 Retry-After`,
+  persisting exchange cooldown state across Railway restarts, staggering hourly crypto
+  ingestion, and fetching spot klines without CCXT's implicit market-catalog burst.
+
 ## [0.1.0] — 2024-01-01
 
 ### Added — Stage 0: Infrastructure & Engineering Standards

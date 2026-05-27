@@ -14,9 +14,14 @@ Pattern:
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from trading_bot.observability.logging import get_logger
 from trading_bot.observability.metrics import (
@@ -41,18 +46,77 @@ class CircuitState:
     """Process-wide circuit state for a single exchange."""
 
     banned_until_ms: int = 0
+    rate_limited_until_ms: int = 0
     last_weight_used: int = 0
     last_weight_updated_at: float = 0.0
     last_ban_alert_at: float = 0.0
+    last_rate_limit_alert_at: float = 0.0
     last_weight_alert_at: float = 0.0
     last_weight_alert_level: str = ""  # "", "warning", "critical"
 
 
 _circuits: dict[str, CircuitState] = {}
+_request_locks: dict[str, asyncio.Lock] = {}
+_state_path: Path | None = None
+
+
+def configure_state_store(path: Path | None) -> None:
+    """Load circuit state from persistent storage and enable later saves.
+
+    Railway mounts ``/data`` across deploys. Persisting the exchange circuit
+    there prevents a restart from immediately probing an IP that is still
+    banned or inside a Retry-After window.
+    """
+    global _state_path
+    _state_path = path
+    if path is None or not path.exists():
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for exchange_id, state in payload.items():
+            if not isinstance(exchange_id, str) or not isinstance(state, dict):
+                continue
+            c = get_circuit(exchange_id)
+            c.banned_until_ms = int(state.get("banned_until_ms", 0))
+            c.rate_limited_until_ms = int(state.get("rate_limited_until_ms", 0))
+            c.last_ban_alert_at = float(state.get("last_ban_alert_at", 0.0))
+            c.last_rate_limit_alert_at = float(state.get("last_rate_limit_alert_at", 0.0))
+        log.info("exchange_circuit_state_loaded", path=str(path))
+    except Exception as exc:
+        log.warning("exchange_circuit_state_load_failed", path=str(path), error=str(exc))
+
+
+def _persist_state() -> None:
+    if _state_path is None:
+        return
+    try:
+        _state_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            exchange_id: {
+                "banned_until_ms": state.banned_until_ms,
+                "rate_limited_until_ms": state.rate_limited_until_ms,
+                "last_ban_alert_at": state.last_ban_alert_at,
+                "last_rate_limit_alert_at": state.last_rate_limit_alert_at,
+            }
+            for exchange_id, state in _circuits.items()
+        }
+        tmp_path = _state_path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp_path.replace(_state_path)
+    except Exception as exc:
+        log.warning("exchange_circuit_state_save_failed", path=str(_state_path), error=str(exc))
 
 
 def get_circuit(exchange_id: str) -> CircuitState:
     return _circuits.setdefault(exchange_id, CircuitState())
+
+
+@asynccontextmanager
+async def request_slot(exchange_id: str) -> AsyncGenerator[None, None]:
+    """Serialize REST requests so a detected ban stops queued calls."""
+    lock = _request_locks.setdefault(exchange_id, asyncio.Lock())
+    async with lock:
+        yield
 
 
 def parse_ban_timestamp_ms(error_text: str) -> int | None:
@@ -70,12 +134,13 @@ def trip_circuit(exchange_id: str, banned_until_ms: int) -> None:
     """Open the circuit until banned_until_ms. Called when 418/-1003 is detected."""
     c = get_circuit(exchange_id)
     c.banned_until_ms = max(c.banned_until_ms, banned_until_ms)
-    seconds_remaining = max(0, (banned_until_ms - int(time.time() * 1000)) // 1000)
+    seconds_remaining = max(0, (c.banned_until_ms - int(time.time() * 1000)) // 1000)
     EXCHANGE_CIRCUIT_OPEN.labels(exchange=exchange_id).set(1)
+    _persist_state()
     log.error(
         "exchange_circuit_tripped",
         exchange=exchange_id,
-        banned_until_ms=banned_until_ms,
+        banned_until_ms=c.banned_until_ms,
         seconds_remaining=seconds_remaining,
     )
 
@@ -91,9 +156,47 @@ def check_circuit(exchange_id: str) -> int:
         # Ban expired — reset
         c.banned_until_ms = 0
         EXCHANGE_CIRCUIT_OPEN.labels(exchange=exchange_id).set(0)
+        _persist_state()
         log.info("exchange_circuit_reset", exchange=exchange_id)
         return 0
     return remaining_ms // 1000
+
+
+def mark_rate_limited(exchange_id: str, retry_after_seconds: float) -> None:
+    """Stop further REST requests until Binance's Retry-After has elapsed."""
+    c = get_circuit(exchange_id)
+    until_ms = int((time.time() + max(retry_after_seconds, 1.0)) * 1000)
+    c.rate_limited_until_ms = max(c.rate_limited_until_ms, until_ms)
+    _persist_state()
+    log.warning(
+        "exchange_rate_limit_blocked",
+        exchange=exchange_id,
+        retry_after_seconds=retry_after_seconds,
+        rate_limited_until_ms=c.rate_limited_until_ms,
+    )
+
+
+def check_rate_limit_cooldown(exchange_id: str) -> int:
+    """Return seconds remaining in a Retry-After cooldown, or zero."""
+    c = get_circuit(exchange_id)
+    remaining_ms = c.rate_limited_until_ms - int(time.time() * 1000)
+    if remaining_ms <= 0:
+        if c.rate_limited_until_ms:
+            c.rate_limited_until_ms = 0
+            _persist_state()
+        return 0
+    return max(1, remaining_ms // 1000)
+
+
+def parse_retry_after_seconds(headers: Any, default: float = 60.0) -> float:
+    """Return a safe Retry-After duration from response headers."""
+    if not headers:
+        return default
+    raw = headers.get("Retry-After") or headers.get("retry-after")
+    try:
+        return max(float(raw), 1.0) if raw is not None else default
+    except (TypeError, ValueError):
+        return default
 
 
 def should_alert_ban(exchange_id: str, dedup_window_s: int = 3600) -> bool:
@@ -106,6 +209,18 @@ def should_alert_ban(exchange_id: str, dedup_window_s: int = 3600) -> bool:
     now = time.time()
     if now - c.last_ban_alert_at >= dedup_window_s:
         c.last_ban_alert_at = now
+        _persist_state()
+        return True
+    return False
+
+
+def should_alert_rate_limit(exchange_id: str, dedup_window_s: int = 3600) -> bool:
+    """Deduplicate direct 429/Retry-After alerts."""
+    c = get_circuit(exchange_id)
+    now = time.time()
+    if now - c.last_rate_limit_alert_at >= dedup_window_s:
+        c.last_rate_limit_alert_at = now
+        _persist_state()
         return True
     return False
 

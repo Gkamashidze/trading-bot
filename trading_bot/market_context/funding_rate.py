@@ -24,8 +24,13 @@ import httpx
 
 from trading_bot.exchange.rate_limit import (
     check_circuit,
+    check_rate_limit_cooldown,
+    mark_rate_limited,
     parse_ban_timestamp_ms,
+    parse_retry_after_seconds,
+    request_slot,
     should_alert_ban,
+    should_alert_rate_limit,
     trip_circuit,
 )
 from trading_bot.observability.logging import get_logger
@@ -72,28 +77,55 @@ class FundingRateProvider:
                     f"Binance ban active — {ban_seconds // 60}min remaining",
                 )
             return self._rate
+        cooldown_seconds = check_rate_limit_cooldown("binance")
+        if cooldown_seconds > 0:
+            self._expires_at = now + timedelta(seconds=cooldown_seconds + 1)
+            log.warning(
+                "funding_rate_skipped_rate_limit_cooldown",
+                retry_after_seconds=cooldown_seconds,
+            )
+            return self._rate
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(_URL, params={"symbol": symbol})
-                # Detect IP ban *before* raise_for_status wraps it generically
-                if resp.status_code in (418, 429):
-                    banned_until_ms = parse_ban_timestamp_ms(resp.text)
-                    if banned_until_ms is not None:
-                        trip_circuit("binance", banned_until_ms)
-                        self._expires_at = datetime.fromtimestamp(banned_until_ms / 1000, tz=UTC)
-                        if should_alert_ban("binance"):
+            async with request_slot("binance"):
+                ban_seconds = check_circuit("binance")
+                cooldown_seconds = check_rate_limit_cooldown("binance")
+                if ban_seconds > 0 or cooldown_seconds > 0:
+                    wait_seconds = max(ban_seconds, cooldown_seconds)
+                    self._expires_at = now + timedelta(seconds=wait_seconds + 1)
+                    return self._rate
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    resp = await client.get(_URL, params={"symbol": symbol})
+                    # Detect IP ban before raise_for_status wraps it generically.
+                    if resp.status_code in (418, 429):
+                        banned_until_ms = parse_ban_timestamp_ms(resp.text)
+                        if banned_until_ms is not None:
+                            trip_circuit("binance", banned_until_ms)
+                            self._expires_at = datetime.fromtimestamp(
+                                banned_until_ms / 1000, tz=UTC
+                            )
+                            if should_alert_ban("binance"):
+                                await _send_context_alert(
+                                    "funding_rate_banned",
+                                    "Binance IP banned via Funding Rate endpoint - "
+                                    "caching None until ban expires",
+                                )
+                            return self._rate
+                    if resp.status_code == 429:
+                        retry_after = parse_retry_after_seconds(resp.headers)
+                        mark_rate_limited("binance", retry_after)
+                        self._expires_at = now + timedelta(seconds=retry_after)
+                        if should_alert_rate_limit("binance"):
                             await _send_context_alert(
-                                "funding_rate_banned",
-                                "Binance IP banned via Funding Rate endpoint — "
-                                "caching None until ban expires",
+                                "funding_rate_rate_limited",
+                                f"Binance requested Retry-After={retry_after:.0f}s",
                             )
                         return self._rate
-                resp.raise_for_status()
-                data = resp.json()
-                self._rate = float(data["lastFundingRate"])
-                self._expires_at = _next_settlement(now)
-                log.info("funding_rate_fetched", symbol=symbol, rate=self._rate)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    self._rate = float(data["lastFundingRate"])
+                    self._expires_at = _next_settlement(now)
+                    log.info("funding_rate_fetched", symbol=symbol, rate=self._rate)
         except Exception as e:
             # Cache the failure for 1h so we don't retry every market-context poll
             self._expires_at = now + _TTL_FAILURE

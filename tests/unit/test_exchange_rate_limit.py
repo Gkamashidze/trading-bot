@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +13,9 @@ from trading_bot.exchange import rate_limit
 @pytest.fixture(autouse=True)
 def reset_circuits() -> None:
     """Wipe the module-level circuits between tests."""
+    rate_limit.configure_state_store(None)
     rate_limit._circuits.clear()
+    rate_limit._request_locks.clear()
 
 
 class TestParseBanTimestamp:
@@ -56,6 +59,17 @@ class TestCircuitBreaker:
         assert rate_limit.check_circuit("binance") > 0
         assert rate_limit.check_circuit("kraken") == 0
 
+    def test_persisted_ban_survives_process_restart(self, tmp_path: Path) -> None:
+        path = tmp_path / "exchange_circuit_state.json"
+        future_ms = int(time.time() * 1000) + 600_000
+        rate_limit.configure_state_store(path)
+        rate_limit.trip_circuit("binance", future_ms)
+
+        rate_limit._circuits.clear()
+        rate_limit.configure_state_store(path)
+
+        assert rate_limit.check_circuit("binance") > 0
+
 
 class TestBanAlertDedup:
     def test_first_alert_passes(self) -> None:
@@ -85,6 +99,16 @@ class TestRateLimitAwareness:
         # 85% of 6000 = 5100 — over 80% threshold
         rate_limit.record_weight("binance", 5100)
         assert rate_limit.should_throttle("binance") is True
+
+    def test_retry_after_cooldown_is_persisted(self, tmp_path: Path) -> None:
+        path = tmp_path / "exchange_circuit_state.json"
+        rate_limit.configure_state_store(path)
+        rate_limit.mark_rate_limited("binance", 120)
+
+        rate_limit._circuits.clear()
+        rate_limit.configure_state_store(path)
+
+        assert rate_limit.check_rate_limit_cooldown("binance") >= 118
 
 
 class TestEdgeTriggeredWeightAlerts:

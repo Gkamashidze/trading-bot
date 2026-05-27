@@ -14,7 +14,9 @@ from trading_bot.market_context.funding_rate import FundingRateProvider
 
 @pytest.fixture(autouse=True)
 def reset_circuits() -> None:
+    rate_limit.configure_state_store(None)
     rate_limit._circuits.clear()
+    rate_limit._request_locks.clear()
 
 
 def _mock_response(status_code: int, text: str = "", json_data: dict | None = None) -> MagicMock:
@@ -66,6 +68,23 @@ async def test_418_response_trips_shared_circuit() -> None:
 
     # Circuit must now be open
     assert rate_limit.check_circuit("binance") > 0
+
+
+@pytest.mark.asyncio
+async def test_429_response_sets_shared_retry_after_cooldown() -> None:
+    """A rate-limit response must pause other Binance REST operations."""
+    mock_resp = _mock_response(429, text="too many requests")
+    mock_resp.headers = {"Retry-After": "120"}
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    provider = FundingRateProvider()
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        await provider.fetch()
+
+    assert rate_limit.check_rate_limit_cooldown("binance") >= 118
 
 
 @pytest.mark.asyncio
