@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -81,6 +82,12 @@ async def _startup() -> tuple[
         fmt=settings.logging.format,
         include_caller=settings.logging.include_caller,
     )
+
+    # Keep Binance ban/Retry-After state across Railway restarts. Otherwise a
+    # deploy during an active ban immediately probes the banned IP again.
+    from trading_bot.exchange.rate_limit import configure_state_store
+
+    configure_state_store(Path(settings.storage.raw_path).parent / "exchange_circuit_state.json")
 
     # ── Tracing ──────────────────────────────────────────────────────────
     configure_tracing(

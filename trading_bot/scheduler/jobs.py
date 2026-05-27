@@ -18,7 +18,7 @@ Usage:
 from __future__ import annotations
 
 import inspect
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from apscheduler.executors.asyncio import AsyncIOExecutor
@@ -171,13 +171,16 @@ async def daily_ohlcv_ingestion_job(
     Failures are alerted to Telegram so silent data outages are visible.
     Skip silently if the exchange has banned our IP (one alert per hour).
     """
-    from datetime import timedelta
-
-    from trading_bot.core.exceptions import ExchangeBannedError
+    from trading_bot.core.exceptions import ExchangeBannedError, ExchangeRateLimitError
     from trading_bot.core.models import ExchangeId
     from trading_bot.data.ingestion import OHLCVDownloader
     from trading_bot.exchange import get_exchange
-    from trading_bot.exchange.rate_limit import check_circuit, should_alert_ban
+    from trading_bot.exchange.rate_limit import (
+        check_circuit,
+        check_rate_limit_cooldown,
+        should_alert_ban,
+        should_alert_rate_limit,
+    )
 
     # ── Skip if circuit is open (banned) ────────────────────────────────────
     ban_seconds = check_circuit(exchange_id)
@@ -198,6 +201,26 @@ async def daily_ohlcv_ingestion_job(
             symbol=symbol,
             timeframe=timeframe,
             ban_seconds_remaining=ban_seconds,
+        )
+        return
+    cooldown_seconds = check_rate_limit_cooldown(exchange_id)
+    if cooldown_seconds > 0:
+        if should_alert_rate_limit(exchange_id):
+            from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+            alerter = TelegramAlerter.from_env_optional()
+            if alerter:
+                await alerter.send(
+                    AlertLevel.WARNING,
+                    f"exchange_rate_limited: {exchange_id}",
+                    detail=f"REST ingestion paused for Retry-After={cooldown_seconds}s",
+                )
+        log.warning(
+            "daily_ingestion_skipped_rate_limit_cooldown",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            retry_after_seconds=cooldown_seconds,
         )
         return
 
@@ -259,6 +282,27 @@ async def daily_ohlcv_ingestion_job(
                     detail=f"IP ban detected — pausing REST ingestion ~{ban_min // 60_000}min",
                 )
         return  # finally clause closes the exchange
+    except ExchangeRateLimitError as exc:
+        log.warning(
+            "ohlcv_ingestion_rate_limited",
+            exchange=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            retry_after_seconds=exc.retry_after_seconds,
+        )
+        if should_alert_rate_limit(exchange_id):
+            from trading_bot.alerts.telegram import AlertLevel, TelegramAlerter
+
+            alerter = TelegramAlerter.from_env_optional()
+            if alerter:
+                await alerter.send(
+                    AlertLevel.WARNING,
+                    f"exchange_rate_limited: {exchange_id}",
+                    detail=(
+                        f"Binance returned 429; honoring Retry-After={exc.retry_after_seconds:.0f}s"
+                    ),
+                )
+        return
     except Exception as e:
         log.error(
             "ohlcv_ingestion_failed",
@@ -522,6 +566,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     # Stagger daily cron jobs across the 01:00 hour with a 5-minute jitter so
     # symbol-1 and symbol-2 don't burst Binance with simultaneous requests.
     daily_minute_offset = 0
+    intraday_start_offset_seconds = 0
     for symbol in crypto.symbols:
         symbol_safe = symbol.replace("/", "_").replace(":", "_").lower()
         for timeframe in crypto.timeframes:
@@ -532,6 +577,7 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                 "timeframe": timeframe,
             }
             if timeframe in _INTRADAY_TIMEFRAMES:
+                next_run = datetime.now(UTC) + timedelta(seconds=intraday_start_offset_seconds)
                 scheduler.add_job(
                     daily_ohlcv_ingestion_job,
                     trigger="interval",
@@ -539,9 +585,10 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
                     id=job_id,
                     name=f"Hourly {symbol} {timeframe} ingestion",
                     replace_existing=True,
-                    next_run_time=datetime.now(UTC),  # fire immediately on startup
+                    next_run_time=next_run,
                     kwargs=kwargs,
                 )
+                intraday_start_offset_seconds += 60
             else:
                 scheduler.add_job(
                     daily_ohlcv_ingestion_job,

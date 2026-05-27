@@ -37,9 +37,13 @@ from trading_bot.core.exceptions import (
 )
 from trading_bot.exchange.rate_limit import (
     check_circuit,
+    check_rate_limit_cooldown,
     cooldown_if_needed,
+    mark_rate_limited,
     parse_ban_timestamp_ms,
+    parse_retry_after_seconds,
     record_weight,
+    request_slot,
     trip_circuit,
 )
 from trading_bot.observability.logging import get_logger
@@ -75,7 +79,9 @@ class BinanceExchange(ExchangeInterface):
             "secret": api_secret or None,
             "timeout": timeout_ms,
             "enableRateLimit": True,
-            "options": {"defaultType": "spot"},
+            # Restrict metadata discovery to spot. The default CCXT Binance
+            # configuration also loads futures and delivery market catalogs.
+            "options": {"defaultType": "spot", "fetchMarkets": {"types": ["spot"]}},
         }
 
         if testnet:
@@ -97,13 +103,19 @@ class BinanceExchange(ExchangeInterface):
         """Close the underlying HTTP session. Call on shutdown."""
         await self._client.close()
 
-    def _assert_circuit_closed(self) -> None:
-        """Raise ExchangeBannedError if Binance has banned our IP."""
+    def _assert_request_allowed(self) -> None:
+        """Raise before touching Binance while a ban or Retry-After is active."""
         ban_seconds_remaining = check_circuit("binance")
         if ban_seconds_remaining > 0:
             raise ExchangeBannedError(
                 f"Binance IP ban active — {ban_seconds_remaining}s remaining",
                 banned_until_ms=int(time.time() * 1000) + ban_seconds_remaining * 1000,
+            )
+        cooldown_seconds = check_rate_limit_cooldown("binance")
+        if cooldown_seconds > 0:
+            raise ExchangeRateLimitError(
+                f"Binance Retry-After active — {cooldown_seconds}s remaining",
+                retry_after_seconds=float(cooldown_seconds),
             )
 
     def _handle_ccxt_error(self, exc: Exception) -> Exception:
@@ -120,10 +132,28 @@ class BinanceExchange(ExchangeInterface):
                 f"Binance IP banned: {exc}",
                 banned_until_ms=banned_until_ms,
             )
+        if isinstance(exc, ccxt.DDoSProtection) and " 418 " in msg:
+            retry_after = parse_retry_after_seconds(
+                getattr(self._client, "last_response_headers", None)
+            )
+            banned_until_ms = int((time.time() + retry_after) * 1000)
+            trip_circuit("binance", banned_until_ms)
+            return ExchangeBannedError(
+                f"Binance IP banned: {exc}",
+                banned_until_ms=banned_until_ms,
+            )
         if isinstance(exc, ccxt.AuthenticationError):
             return ExchangeAuthError(f"Binance auth failed: {exc}")
-        if isinstance(exc, ccxt.RateLimitExceeded):
-            return ExchangeRateLimitError(f"Binance rate limit: {exc}", retry_after_seconds=60.0)
+        if isinstance(exc, ccxt.RateLimitExceeded) or (
+            isinstance(exc, ccxt.DDoSProtection) and " 429 " in msg
+        ):
+            retry_after = parse_retry_after_seconds(
+                getattr(self._client, "last_response_headers", None)
+            )
+            mark_rate_limited("binance", retry_after)
+            return ExchangeRateLimitError(
+                f"Binance rate limit: {exc}", retry_after_seconds=retry_after
+            )
         if isinstance(exc, ccxt.NetworkError):
             return ExchangeConnectionError(f"Binance network error: {exc}")
         return exc
@@ -131,7 +161,8 @@ class BinanceExchange(ExchangeInterface):
     # ── Read-only operations ────────────────────────────────────────────────
 
     @retry(
-        retry=retry_if_exception_type((ExchangeConnectionError, ExchangeRateLimitError)),
+        # Never retry 429: Binance requires clients to honor Retry-After.
+        retry=retry_if_exception_type(ExchangeConnectionError),
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=2, min=2, max=30),
         reraise=True,
@@ -143,45 +174,54 @@ class BinanceExchange(ExchangeInterface):
         since: datetime | None = None,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
-        """Fetch OHLCV bars from Binance. Returns raw CCXT format."""
-        self._assert_circuit_closed()
-        await cooldown_if_needed("binance", seconds=60)
+        """Fetch spot OHLCV bars without CCXT's implicit market-catalog request."""
 
         since_ms: int | None = None
         if since is not None:
             since_ms = int(since.timestamp() * 1000)
+        params: dict[str, Any] = {
+            "symbol": symbol.replace("/", "").split(":")[0],
+            "interval": timeframe,
+            "limit": min(limit, 1000),
+        }
+        if since_ms is not None:
+            params["startTime"] = since_ms
 
-        with (
-            start_span(
-                "exchange.fetch_ohlcv",
-                {"exchange": "binance", "symbol": symbol, "timeframe": timeframe},
-            ),
-            API_LATENCY.labels(exchange="binance", method="fetch_ohlcv").time(),
-        ):
-            try:
-                raw = await self._client.fetch_ohlcv(
-                    symbol, timeframe=timeframe, since=since_ms, limit=limit
-                )
-                self._record_rate_limit_headers()
-                return [
-                    {
-                        "open_time": datetime.fromtimestamp(row[0] / 1000, tz=UTC),
-                        "open": Decimal(str(row[1])),
-                        "high": Decimal(str(row[2])),
-                        "low": Decimal(str(row[3])),
-                        "close": Decimal(str(row[4])),
-                        "volume": Decimal(str(row[5])),
-                        "quote_volume": Decimal(str(row[7])) if len(row) > 7 else Decimal("0"),
-                        "trade_count": int(row[8]) if len(row) > 8 else None,
-                        "close_time": datetime.fromtimestamp(
-                            (row[0] + _timeframe_to_ms(timeframe) - 1) / 1000,
-                            tz=UTC,
-                        ),
-                    }
-                    for row in raw
-                ]
-            except Exception as e:
-                raise self._handle_ccxt_error(e) from e
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            await cooldown_if_needed("binance", seconds=60)
+            self._assert_request_allowed()
+            with (
+                start_span(
+                    "exchange.fetch_ohlcv",
+                    {"exchange": "binance", "symbol": symbol, "timeframe": timeframe},
+                ),
+                API_LATENCY.labels(exchange="binance", method="fetch_ohlcv").time(),
+            ):
+                try:
+                    raw = await self._client.public_get_klines(params)
+                    self._record_rate_limit_headers()
+                    return [
+                        {
+                            "open_time": datetime.fromtimestamp(row[0] / 1000, tz=UTC),
+                            "open": Decimal(str(row[1])),
+                            "high": Decimal(str(row[2])),
+                            "low": Decimal(str(row[3])),
+                            "close": Decimal(str(row[4])),
+                            "volume": Decimal(str(row[5])),
+                            "quote_volume": (
+                                Decimal(str(row[7])) if len(row) > 7 else Decimal("0")
+                            ),
+                            "trade_count": int(row[8]) if len(row) > 8 else None,
+                            "close_time": datetime.fromtimestamp(
+                                (row[0] + _timeframe_to_ms(timeframe) - 1) / 1000,
+                                tz=UTC,
+                            ),
+                        }
+                        for row in raw
+                    ]
+                except Exception as e:
+                    raise self._handle_ccxt_error(e) from e
 
     def _record_rate_limit_headers(self) -> None:
         """Parse X-MBX-USED-WEIGHT-1M from the last CCXT response."""
@@ -197,58 +237,63 @@ class BinanceExchange(ExchangeInterface):
 
     async def get_server_time(self) -> datetime:
         """Return Binance server time as UTC-aware datetime."""
-        self._assert_circuit_closed()
-        with start_span("exchange.get_server_time", {"exchange": "binance"}):
-            try:
-                result = await self._client.fetch_time()
-                self._record_rate_limit_headers()
-                return datetime.fromtimestamp(result / 1000, tz=UTC)
-            except Exception as e:
-                raise self._handle_ccxt_error(e) from e
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            with start_span("exchange.get_server_time", {"exchange": "binance"}):
+                try:
+                    result = await self._client.fetch_time()
+                    self._record_rate_limit_headers()
+                    return datetime.fromtimestamp(result / 1000, tz=UTC)
+                except Exception as e:
+                    raise self._handle_ccxt_error(e) from e
 
     async def fetch_balances(self) -> dict[str, Decimal]:
         """Return spot balances. Requires non-empty API key."""
-        self._assert_circuit_closed()
-        try:
-            result = await self._client.fetch_balance()
-            self._record_rate_limit_headers()
-            return {
-                asset: Decimal(str(amount["total"]))
-                for asset, amount in result["total"].items()
-                if float(amount) > 0
-            }
-        except Exception as e:
-            raise self._handle_ccxt_error(e) from e
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                result = await self._client.fetch_balance()
+                self._record_rate_limit_headers()
+                return {
+                    asset: Decimal(str(amount["total"]))
+                    for asset, amount in result["total"].items()
+                    if float(amount) > 0
+                }
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
 
     async def fetch_open_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
         """Return open orders. Stage 0: not yet implemented for live trading."""
-        self._assert_circuit_closed()
-        try:
-            result = cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol))
-            self._record_rate_limit_headers()
-            return result
-        except Exception as e:
-            raise self._handle_ccxt_error(e) from e
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                result = cast(list[dict[str, Any]], await self._client.fetch_open_orders(symbol))
+                self._record_rate_limit_headers()
+                return result
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
 
     async def fetch_trade_fees(self, symbol: str) -> dict[str, Decimal]:
-        self._assert_circuit_closed()
-        try:
-            fees = await self._client.fetch_trading_fee(symbol)
-            self._record_rate_limit_headers()
-        except Exception as e:
-            raise self._handle_ccxt_error(e) from e
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                fees = await self._client.fetch_trading_fee(symbol)
+                self._record_rate_limit_headers()
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
         return {
             "maker": Decimal(str(fees.get("maker", 0.001))),
             "taker": Decimal(str(fees.get("taker", 0.001))),
         }
 
     async def get_symbol_info(self, symbol: str) -> dict[str, Any]:
-        self._assert_circuit_closed()
-        try:
-            markets = await self._client.load_markets()
-            self._record_rate_limit_headers()
-        except Exception as e:
-            raise self._handle_ccxt_error(e) from e
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                markets = await self._client.load_markets()
+                self._record_rate_limit_headers()
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
         return cast(dict[str, Any], markets.get(symbol, {}))
 
     async def place_order(self, order: Any) -> dict[str, Any]:
@@ -266,17 +311,21 @@ class BinanceExchange(ExchangeInterface):
         if check_circuit("binance") > 0:
             log.debug("binance_health_skipped_circuit_open")
             return False
-        try:
-            await self._client.fetch_time()
-            self._record_rate_limit_headers()
-            log.debug("binance_health_ok", testnet=self._testnet)
-            return True
-        except Exception as e:
-            # Trip the circuit if this exposed a ban (don't re-raise — health_check
-            # callers expect a bool return).
-            self._handle_ccxt_error(e)
-            log.warning("binance_health_failed", error=str(e), testnet=self._testnet)
-            return False
+        async with request_slot("binance"):
+            if check_circuit("binance") > 0 or check_rate_limit_cooldown("binance") > 0:
+                log.debug("binance_health_skipped_circuit_open")
+                return False
+            try:
+                await self._client.fetch_time()
+                self._record_rate_limit_headers()
+                log.debug("binance_health_ok", testnet=self._testnet)
+                return True
+            except Exception as e:
+                # Trip the circuit if this exposed a ban (don't re-raise — health_check
+                # callers expect a bool return).
+                self._handle_ccxt_error(e)
+                log.warning("binance_health_failed", error=str(e), testnet=self._testnet)
+                return False
 
 
 def _timeframe_to_ms(timeframe: str) -> int:

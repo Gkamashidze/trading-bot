@@ -57,6 +57,8 @@ data/last_signal.json
 data/last_signal.json.tmp
 data/lineage_store.json
 data/lineage_store.json.tmp
+data/exchange_circuit_state.json
+data/exchange_circuit_state.tmp
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 trading_bot/logs/*.log
