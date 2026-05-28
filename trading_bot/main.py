@@ -231,18 +231,45 @@ async def _startup() -> tuple[
                 reason="TELEGRAM_BOT_TOKEN or TELEGRAM_ALERT_CHAT_ID not set",
             )
 
-    # ── WebSocket price feed ──────────────────────────────────────────────
+    # ── WebSocket price feed + kline persistence ─────────────────────────
     from trading_bot.feature_flags import is_enabled
 
     ws_client = None
-    if await is_enabled("websocket_enabled"):
+    ws_price_enabled = await is_enabled("websocket_enabled")
+    ws_kline_enabled = await is_enabled("websocket_kline_ingestion_enabled") and await is_enabled(
+        "data_ingestion_enabled"
+    )
+    if ws_price_enabled or ws_kline_enabled:
         price_cache = get_price_cache()
         ws_symbols = [s.replace("/", "") for s in settings.trading.crypto.symbols]
-        ws_client = BinanceWebSocketClient(symbols=ws_symbols, on_tick=price_cache.update)
+        price_symbols = ws_symbols if ws_price_enabled else []
+        kline_aggregator = None
+        kline_streams: list[str] = []
+        if ws_kline_enabled:
+            from trading_bot.websocket import BinanceKlineAggregator
+
+            kline_aggregator = BinanceKlineAggregator(
+                symbols=settings.trading.crypto.symbols,
+                timeframes=settings.trading.crypto.timeframes,
+            )
+            kline_streams = kline_aggregator.streams
+        ws_client = BinanceWebSocketClient(
+            symbols=price_symbols,
+            on_tick=price_cache.update,
+            extra_streams=kline_streams,
+            on_message=kline_aggregator.handle_message if kline_aggregator else None,
+        )
         ws_client.start()
-        log.info("websocket_started", symbols=ws_symbols)
+        log.info(
+            "websocket_started",
+            price_symbols=price_symbols,
+            kline_streams=kline_streams,
+        )
     else:
-        log.info("websocket_skipped_flag", flag="websocket_enabled")
+        log.info(
+            "websocket_skipped_flag",
+            flags=["websocket_enabled", "websocket_kline_ingestion_enabled"],
+        )
 
     # ── Dashboard wiring (pool + scheduler available now) ─────────────────
     init_dashboard(pool=pool, scheduler=scheduler)

@@ -128,3 +128,29 @@ class TestBinanceWebSocketClient:
     def test_symbol_normalisation(self) -> None:
         client = BinanceWebSocketClient(symbols=["BTC/USDT", "ETH/USDT"], on_tick=AsyncMock())
         assert client._streams == ["btcusdt", "ethusdt"]
+
+    @pytest.mark.asyncio
+    async def test_dispatches_kline_payload_to_raw_handler(self) -> None:
+        on_tick = AsyncMock()
+        on_message = AsyncMock()
+        client = BinanceWebSocketClient(
+            symbols=["BTC/USDT"],
+            on_tick=on_tick,
+            extra_streams=["btcusdt@kline_1h"],
+            on_message=on_message,
+        )
+        payload = {"e": "kline", "s": "BTCUSDT", "k": {"x": True}}
+
+        await client._handle(json.dumps({"stream": "btcusdt@kline_1h", "data": payload}))
+
+        on_message.assert_awaited_once_with(payload)
+        on_tick.assert_not_called()
+
+    def test_combines_price_and_kline_stream_names(self) -> None:
+        client = BinanceWebSocketClient(
+            symbols=["BTC/USDT"],
+            on_tick=AsyncMock(),
+            extra_streams=["btcusdt@kline_1h"],
+        )
+
+        assert client._stream_names() == ["btcusdt@miniTicker", "btcusdt@kline_1h"]

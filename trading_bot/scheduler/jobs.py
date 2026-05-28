@@ -94,7 +94,7 @@ async def backtest_refresh_job() -> None:
 
 
 _INTRADAY_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h"}
-_TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
+_TIMEFRAME_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400}
 
 # Bootstrap window (calendar days) for each Wave 1 ETF on first ingestion run.
 # Larger than required_history_days to provide richer backtest coverage.
@@ -115,6 +115,52 @@ def _has_existing_data(exchange_id: str, symbol: str, timeframe: str) -> bool:
     symbol_safe = symbol.replace("/", "_").replace(":", "_")
     parquet_dir = Path(get_settings().storage.raw_path) / exchange_id / symbol_safe / timeframe
     return parquet_dir.exists() and any(parquet_dir.glob("*.parquet"))
+
+
+def _last_stored_bar_time(exchange_id: str, symbol: str, timeframe: str) -> datetime | None:
+    """Return latest open_time currently stored for a market, if any."""
+    from pathlib import Path
+
+    import pandas as pd
+
+    from trading_bot.config import get_settings
+
+    symbol_safe = symbol.replace("/", "_").replace(":", "_")
+    parquet_dir = Path(get_settings().storage.raw_path) / exchange_id / symbol_safe / timeframe
+    if not parquet_dir.exists():
+        return None
+
+    latest: datetime | None = None
+    for parquet_file in sorted(parquet_dir.glob("*.parquet"), reverse=True):
+        try:
+            df = pd.read_parquet(parquet_file, columns=["open_time"])
+        except Exception as exc:
+            log.warning("parquet_read_error", file=str(parquet_file), error=str(exc))
+            continue
+        if df.empty:
+            continue
+        file_latest = pd.to_datetime(df["open_time"].max(), utc=True).to_pydatetime()
+        if latest is None or file_latest > latest:
+            latest = file_latest
+    return latest
+
+
+def _rest_gap_fill_required(
+    exchange_id: str,
+    symbol: str,
+    timeframe: str,
+    now: datetime | None = None,
+) -> tuple[bool, datetime | None, float | None]:
+    """Return whether REST should fill a missing WebSocket kline gap."""
+    last_bar = _last_stored_bar_time(exchange_id, symbol, timeframe)
+    if last_bar is None:
+        return True, None, None
+    interval_s = _TIMEFRAME_SECONDS.get(timeframe)
+    if interval_s is None:
+        return True, last_bar, None
+    current = now or datetime.now(UTC)
+    age_s = (current - last_bar).total_seconds()
+    return age_s > interval_s * 2, last_bar, age_s
 
 
 async def _close_exchange_if_supported(exchange: Any) -> None:
@@ -182,7 +228,34 @@ async def daily_ohlcv_ingestion_job(
         should_alert_rate_limit,
     )
 
-    # ── Skip if circuit is open (banned) ────────────────────────────────────
+    log.info(
+        "ohlcv_ingestion_started",
+        exchange=exchange_id,
+        symbol=symbol,
+        timeframe=timeframe,
+    )
+
+    if not await _asset_data_ingestion_allowed(symbol):
+        return
+
+    now = datetime.now(UTC)
+    last_bar_time: datetime | None = None
+    if exchange_id == "binance":
+        rest_required, last_bar_time, age_s = _rest_gap_fill_required(
+            exchange_id, symbol, timeframe, now
+        )
+        if not rest_required:
+            log.info(
+                "ohlcv_ingestion_skipped_fresh_websocket_data",
+                exchange=exchange_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                last_bar_time=last_bar_time.isoformat() if last_bar_time else None,
+                age_seconds=age_s,
+            )
+            return
+
+    # ── Skip REST if circuit is open (banned) ───────────────────────────────
     ban_seconds = check_circuit(exchange_id)
     if ban_seconds > 0:
         if should_alert_ban(exchange_id):
@@ -193,7 +266,7 @@ async def daily_ohlcv_ingestion_job(
                 await alerter.send(
                     AlertLevel.WARNING,
                     f"exchange_banned: {exchange_id}",
-                    detail=f"REST ingestion paused — IP ban for {ban_seconds // 60}min remaining",
+                    detail=f"REST ingestion paused - IP ban for {ban_seconds // 60}min remaining",
                 )
         log.warning(
             "daily_ingestion_skipped_ban_active",
@@ -224,17 +297,6 @@ async def daily_ohlcv_ingestion_job(
         )
         return
 
-    log.info(
-        "ohlcv_ingestion_started",
-        exchange=exchange_id,
-        symbol=symbol,
-        timeframe=timeframe,
-    )
-
-    if not await _asset_data_ingestion_allowed(symbol):
-        return
-
-    now = datetime.now(UTC)
     if timeframe in _INTRADAY_TIMEFRAMES:
         interval_s = _TIMEFRAME_SECONDS[timeframe]
         ts = int(now.timestamp())
@@ -244,11 +306,15 @@ async def daily_ohlcv_ingestion_job(
         # Gap-fill: 4-hour window on subsequent runs (resume logic fills exact gap).
         bootstrap = not _has_existing_data(exchange_id, symbol, timeframe)
         start = end - timedelta(days=30 if bootstrap else 4)
+        if not bootstrap and last_bar_time is not None:
+            start = min(start, last_bar_time)
     else:
         end = now.replace(hour=0, minute=0, second=0, microsecond=0)
         bootstrap = not _has_existing_data(exchange_id, symbol, timeframe)
         # Bootstrap: full history window; gap-fill: 3-day window (covers weekend gaps).
         start = end - timedelta(days=bootstrap_days if bootstrap else 3)
+        if not bootstrap and last_bar_time is not None:
+            start = min(start, last_bar_time)
 
     exchange = get_exchange(ExchangeId(exchange_id))
     downloader = OHLCVDownloader(exchange=exchange)
