@@ -21,6 +21,7 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
@@ -47,9 +48,13 @@ class BinanceWebSocketClient:
         self,
         symbols: list[str],
         on_tick: Callable[[PriceTick], Awaitable[None]],
+        extra_streams: list[str] | None = None,
+        on_message: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self._streams = [s.lower().replace("/", "") for s in symbols]
         self._on_tick = on_tick
+        self._extra_streams = [s.lower() for s in (extra_streams or [])]
+        self._on_message = on_message
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -71,10 +76,11 @@ class BinanceWebSocketClient:
 
     async def _run(self) -> None:
         backoff = _INITIAL_BACKOFF
-        if len(self._streams) == 1:
-            url = f"{_WS_BASE}/{self._streams[0]}@miniTicker"
+        stream_names = self._stream_names()
+        if len(stream_names) == 1:
+            url = f"{_WS_BASE}/{stream_names[0]}"
         else:
-            streams = "/".join(f"{s}@miniTicker" for s in self._streams)
+            streams = "/".join(stream_names)
             url = _WS_COMBINED.format(streams=streams)
 
         while self._running:
@@ -99,12 +105,17 @@ class BinanceWebSocketClient:
 
         log.info("ws_stopped")
 
+    def _stream_names(self) -> list[str]:
+        return [f"{s}@miniTicker" for s in self._streams] + self._extra_streams
+
     async def _handle(self, raw: str | bytes) -> None:
         try:
             data = json.loads(raw)
             # Combined stream wraps payload: {"stream": "...", "data": {...}}
             if "data" in data:
                 data = data["data"]
+            if self._on_message is not None:
+                await self._on_message(data)
             if data.get("e") != "24hrMiniTicker":
                 return
             tick = PriceTick(

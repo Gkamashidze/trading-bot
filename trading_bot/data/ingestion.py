@@ -195,13 +195,75 @@ class OHLCVDownloader:
                 f"Failed to fetch OHLCV for {symbol} [{timeframe}] from {start}: {e}"
             ) from e
 
+        return self._write_bars(
+            exchange_id=exchange_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            raw_bars=raw_bars,
+            parquet_path=parquet_path,
+            fetched_at=fetched_at,
+            source=f"{exchange_id.value}.fetch_ohlcv",
+            end=end,
+        )
+
+    def append_bars(
+        self,
+        exchange_id: ExchangeId,
+        symbol: str,
+        timeframe: str,
+        raw_bars: list[dict[str, Any]],
+        source: str,
+        fetched_at: datetime | None = None,
+    ) -> int:
+        """Append already-fetched OHLCV bars to Parquet partitions.
+
+        Used by WebSocket kline aggregation. Shares the same idempotent merge
+        path as REST ingestion so duplicate closed-bar events are harmless.
+        """
+        total_inserted = 0
+        fetched = fetched_at or datetime.now(UTC)
+        for bar in raw_bars:
+            open_time = bar.get("open_time")
+            if not isinstance(open_time, datetime):
+                open_time = pd.Timestamp(open_time).to_pydatetime()
+            if open_time.tzinfo is None:
+                open_time = open_time.replace(tzinfo=UTC)
+            parquet_path = self._partition_path(
+                exchange_id.value,
+                symbol,
+                timeframe,
+                open_time.year,
+                open_time.month,
+            )
+            total_inserted += self._write_bars(
+                exchange_id=exchange_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                raw_bars=[bar],
+                parquet_path=parquet_path,
+                fetched_at=fetched,
+                source=source,
+            )
+        return total_inserted
+
+    def _write_bars(
+        self,
+        exchange_id: ExchangeId,
+        symbol: str,
+        timeframe: str,
+        raw_bars: list[dict[str, Any]],
+        parquet_path: Path,
+        fetched_at: datetime,
+        source: str,
+        end: datetime | None = None,
+    ) -> int:
+        """Merge bars into a partition and return newly inserted open_times."""
         if not raw_bars:
-            log.debug("no_bars_returned", symbol=symbol, start=start.isoformat())
+            log.debug("no_bars_returned", symbol=symbol)
             return 0
 
         # Convert to DataFrame
         df = pd.DataFrame(raw_bars)
-        source = f"{exchange_id.value}.fetch_ohlcv"
         df["symbol"] = symbol
         df["exchange"] = str(exchange_id)
         df["timeframe"] = timeframe
@@ -210,19 +272,24 @@ class OHLCVDownloader:
         df["fetched_at"] = fetched_at
 
         # Filter to requested time range
-        df = df[df["open_time"] <= end]
+        if end is not None:
+            df = df[df["open_time"] <= end]
 
         if df.empty:
             return 0
 
         # Merge with existing file (idempotent: deduplicate on open_time)
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
-        if parquet_path.exists():  # noqa: ASYNC240
+        existing_open_times: set[pd.Timestamp] = set()
+        if parquet_path.exists():
             existing = pd.read_parquet(parquet_path)
+            existing_open_times = set(pd.to_datetime(existing["open_time"], utc=True))
             df = pd.concat([existing, df], ignore_index=True)
 
         df = df.drop_duplicates(subset=["open_time"], keep="last")
         df = df.sort_values("open_time").reset_index(drop=True)
+        written_open_times = set(pd.to_datetime(df["open_time"], utc=True))
+        inserted_count = len(written_open_times - existing_open_times)
 
         # Write Parquet
         df.to_parquet(parquet_path, index=False, compression="snappy")
@@ -247,9 +314,10 @@ class OHLCVDownloader:
             "partition_written",
             path=str(parquet_path),
             rows=len(df),
+            inserted=inserted_count,
             symbol=symbol,
         )
-        return len(df)
+        return inserted_count
 
 
 def _next_month(dt: datetime) -> datetime:

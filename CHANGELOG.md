@@ -8,11 +8,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- Add Binance WebSocket kline aggregation that persists closed bars directly to Parquet
+  and tracks `trading_websocket_kline_persisted_total`.
+
 ### Fixed
 
 - Prevent repeated Binance IP bans by serializing REST calls, honoring `429 Retry-After`,
   persisting exchange cooldown state across Railway restarts, staggering hourly crypto
   ingestion, and fetching spot klines without CCXT's implicit market-catalog burst.
+- Reduce Binance REST ingestion to gap-fill only when WebSocket kline data is missing
+  or stale.
 
 ## [0.1.0] — 2024-01-01
 

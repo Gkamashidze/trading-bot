@@ -140,6 +140,12 @@ WEBSOCKET_RECONNECTS = Counter(
     labelnames=["exchange", "stream"],
 )
 
+WEBSOCKET_KLINE_PERSISTED = Counter(
+    "trading_websocket_kline_persisted_total",
+    "Closed WebSocket kline bars persisted to Parquet",
+    labelnames=["exchange", "symbol", "timeframe"],
+)
+
 FEATURE_FLAG_EVALUATIONS = Counter(
     "trading_feature_flag_evaluations_total",
     "Total feature flag evaluations",

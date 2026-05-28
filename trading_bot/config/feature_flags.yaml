@@ -23,6 +23,12 @@ flags:
     owner: "infra"
     critical: false
 
+  websocket_kline_ingestion_enabled:
+    default: true
+    description: "Persists closed Binance WebSocket klines to Parquet; REST becomes gap-fill only"
+    owner: "data"
+    critical: false
+
   data_ingestion_enabled:
     default: true
     description: "Enables APScheduler daily OHLCV ingestion jobs"
