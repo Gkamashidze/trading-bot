@@ -10,10 +10,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from trading_bot.market_context import MarketContext
+from trading_bot.exchange import rate_limit
+from trading_bot.market_context import MarketContext, funding_rate
 from trading_bot.market_context.fear_greed import FearGreedProvider
 from trading_bot.market_context.funding_rate import FundingRateProvider
 from trading_bot.market_context.macro import MacroProvider
+
+
+@pytest.fixture(autouse=True)
+def reset_funding_rate_state() -> None:
+    rate_limit.configure_state_store(None)
+    rate_limit._circuits.clear()
+    rate_limit._request_locks.clear()
+    funding_rate._reset_state_for_tests()
+
 
 # ── MarketContext dataclass ───────────────────────────────────────────────────
 
