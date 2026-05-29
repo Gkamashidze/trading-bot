@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from trading_bot.exchange import rate_limit
+from trading_bot.market_context import funding_rate
 from trading_bot.market_context.funding_rate import FundingRateProvider
 
 
@@ -17,6 +18,7 @@ def reset_circuits() -> None:
     rate_limit.configure_state_store(None)
     rate_limit._circuits.clear()
     rate_limit._request_locks.clear()
+    funding_rate._reset_state_for_tests()
 
 
 def _mock_response(status_code: int, text: str = "", json_data: dict | None = None) -> MagicMock:
@@ -138,3 +140,63 @@ async def test_cache_hit_skips_network() -> None:
 
     assert rate == 0.0002
     mock_client.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ban_cache_is_shared_across_provider_instances() -> None:
+    """A funding ban must silence later provider instances until the ban expires."""
+    banned_until = int(time.time() * 1000) + 30_000
+    body = (
+        f'{{"code":-1003,"msg":"Way too many requests; IP(1.2.3.4) banned until {banned_until}"}}'
+    )
+    mock_resp = _mock_response(418, text=body)
+    first_client = MagicMock()
+    first_client.__aenter__ = AsyncMock(return_value=first_client)
+    first_client.__aexit__ = AsyncMock(return_value=False)
+    first_client.get = AsyncMock(return_value=mock_resp)
+    second_client = MagicMock()
+    second_client.__aenter__ = AsyncMock(return_value=second_client)
+    second_client.__aexit__ = AsyncMock(return_value=False)
+    second_client.get = AsyncMock()
+
+    with (
+        patch("httpx.AsyncClient", side_effect=[first_client, second_client]),
+        patch(
+            "trading_bot.market_context.funding_rate._send_context_alert", new_callable=AsyncMock
+        ) as send_alert,
+    ):
+        assert await FundingRateProvider().fetch() is None
+        assert await FundingRateProvider().fetch() is None
+
+    first_client.get.assert_awaited_once()
+    second_client.get.assert_not_called()
+    send_alert.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_same_ban_window_alerts_only_once_even_if_cache_is_cleared() -> None:
+    """Funding-specific alert dedupe lasts for the whole Binance ban window."""
+    banned_until = int(time.time() * 1000) + 30_000
+    body = (
+        f'{{"code":-1003,"msg":"Way too many requests; IP(1.2.3.4) banned until {banned_until}"}}'
+    )
+
+    async def fetch_with_418() -> None:
+        mock_resp = _mock_response(418, text=body)
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await FundingRateProvider().fetch()
+
+    with patch(
+        "trading_bot.market_context.funding_rate._send_context_alert",
+        new_callable=AsyncMock,
+    ) as send_alert:
+        await fetch_with_418()
+        funding_rate._cache.clear()
+        rate_limit._circuits.clear()
+        await fetch_with_418()
+
+    send_alert.assert_awaited_once()
