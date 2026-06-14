@@ -200,3 +200,73 @@ async def test_same_ban_window_alerts_only_once_even_if_cache_is_cleared() -> No
         await fetch_with_418()
 
     send_alert.assert_awaited_once()
+
+
+def _ban_client(body: str) -> MagicMock:
+    resp = _mock_response(418, text=body)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.get = AsyncMock(return_value=resp)
+    return client
+
+
+def _ok_client() -> MagicMock:
+    resp = _mock_response(200, json_data={"lastFundingRate": "0.0001"})
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.get = AsyncMock(return_value=resp)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_repeated_bans_back_off_and_alert_once() -> None:
+    """Repeated bans must grow the re-probe interval and alert only once."""
+    banned_until = int(time.time() * 1000) + 30_000
+    body = f'{{"code":-1003,"msg":"IP(1.2.3.4) banned until {banned_until}"}}'
+
+    async def fetch_418() -> datetime:
+        with patch("httpx.AsyncClient", return_value=_ban_client(body)):
+            await FundingRateProvider().fetch()
+        return funding_rate._cache["BTCUSDT"].expires_at
+
+    with patch(
+        "trading_bot.market_context.funding_rate._send_context_alert",
+        new_callable=AsyncMock,
+    ) as send_alert:
+        first_expiry = await fetch_418()
+        funding_rate._cache.clear()
+        rate_limit._circuits.clear()
+        second_expiry = await fetch_418()
+
+    assert funding_rate._consecutive_bans == 2
+    send_alert.assert_awaited_once()  # only the first ban in the streak alerts
+    assert second_expiry > first_expiry  # backoff grows each ban
+
+
+@pytest.mark.asyncio
+async def test_success_resets_streak_so_a_fresh_ban_realerts() -> None:
+    """A successful fetch clears the streak so the next ban alerts again."""
+    banned_until = int(time.time() * 1000) + 30_000
+    ban_body = f'{{"code":-1003,"msg":"IP(1.2.3.4) banned until {banned_until}"}}'
+
+    with patch(
+        "trading_bot.market_context.funding_rate._send_context_alert",
+        new_callable=AsyncMock,
+    ) as send_alert:
+        with patch("httpx.AsyncClient", return_value=_ban_client(ban_body)):
+            await FundingRateProvider().fetch()  # ban → alert #1
+        funding_rate._cache.clear()
+        rate_limit._circuits.clear()
+
+        with patch("httpx.AsyncClient", return_value=_ok_client()):
+            await FundingRateProvider().fetch()  # success → streak resets
+        assert funding_rate._consecutive_bans == 0
+        funding_rate._cache.clear()
+        rate_limit._circuits.clear()
+
+        with patch("httpx.AsyncClient", return_value=_ban_client(ban_body)):
+            await FundingRateProvider().fetch()  # fresh ban → alert #2
+
+    assert send_alert.await_count == 2

@@ -11,7 +11,9 @@ Interpretation:
 Rate-limit safety:
   - Reuses the shared Binance circuit breaker (exchange.rate_limit) so a 418
     ban triggered elsewhere also pauses these calls.
-  - 418 response trips the circuit and caches None until the ban expires.
+  - 418 response trips the circuit and caches None. Repeated bans back off
+    exponentially up to 24h and only the first ban in a streak alerts — a
+    region/IP block re-bans the instant the window lifts, so we stop probing.
   - Generic failures cached for 1h (no retry every poll).
   - Alert level: WARNING (not ERROR) — funding rate is non-critical.
 """
@@ -44,6 +46,7 @@ _URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 _SETTLEMENT_HOURS = (0, 8, 16)  # UTC hours when Binance settles funding
 _TTL_FAILURE = timedelta(hours=1)  # retry generic failures after 1h, not every poll
 _STATE_FILE = "funding_rate_state.json"
+_MAX_BAN_BACKOFF_HOURS = 24  # cap re-probe interval during a persistent ban streak
 
 
 @dataclass
@@ -57,6 +60,7 @@ _lock = asyncio.Lock()
 _state_loaded = False
 _state_path: Path | None = None
 _ban_alert_silenced_until_ms = 0
+_consecutive_bans = 0  # drives exponential backoff + single-alert-per-streak
 
 
 def _next_settlement(now: datetime) -> datetime:
@@ -132,13 +136,16 @@ class FundingRateProvider:
                         banned_until_ms = parse_ban_timestamp_ms(resp.text)
                         if banned_until_ms is not None:
                             trip_circuit("binance", banned_until_ms)
-                            expires_at = datetime.fromtimestamp(banned_until_ms / 1000, tz=UTC)
+                            expires_at, first_ban = _register_ban(banned_until_ms, now)
                             self._set_cache(symbol, self._rate, expires_at)
-                            if _should_alert_funding_ban(banned_until_ms):
+                            # Alert once per ban streak — repeated bans are the same
+                            # unactionable condition; stay quiet until a success.
+                            if first_ban and _should_alert_funding_ban(banned_until_ms):
                                 await _send_context_alert(
                                     "funding_rate_banned",
-                                    "Binance IP banned via Funding Rate endpoint - "
-                                    "caching None until ban expires",
+                                    "Binance funding-rate endpoint banned this IP — "
+                                    "backing off, treating funding as unavailable. "
+                                    "Repeated bans suppressed until next success.",
                                 )
                             return self._rate
                     if resp.status_code == 429:
@@ -153,6 +160,7 @@ class FundingRateProvider:
                         return self._rate
                     resp.raise_for_status()
                     data = resp.json()
+                    _reset_ban_streak()  # success — clear backoff + alert silence
                     self._set_cache(symbol, float(data["lastFundingRate"]), _next_settlement(now))
                     log.info("funding_rate_fetched", symbol=symbol, rate=self._rate)
         except Exception as e:
@@ -181,7 +189,7 @@ def _state_store_path() -> Path | None:
 
 
 def _ensure_state_loaded() -> None:
-    global _ban_alert_silenced_until_ms, _state_loaded, _state_path
+    global _ban_alert_silenced_until_ms, _consecutive_bans, _state_loaded, _state_path
     if _state_loaded:
         return
     _state_loaded = True
@@ -191,6 +199,7 @@ def _ensure_state_loaded() -> None:
     try:
         payload = json.loads(_state_path.read_text(encoding="utf-8"))
         _ban_alert_silenced_until_ms = int(payload.get("ban_alert_silenced_until_ms", 0))
+        _consecutive_bans = int(payload.get("consecutive_bans", 0))
         for symbol, raw in payload.get("cache", {}).items():
             if not isinstance(symbol, str) or not isinstance(raw, dict):
                 continue
@@ -222,6 +231,7 @@ def _persist_state() -> None:
         _state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "ban_alert_silenced_until_ms": _ban_alert_silenced_until_ms,
+            "consecutive_bans": _consecutive_bans,
             "cache": {
                 symbol: {
                     "rate": entry.rate,
@@ -247,10 +257,36 @@ def _should_alert_funding_ban(banned_until_ms: int) -> bool:
     return True
 
 
+def _register_ban(banned_until_ms: int, now: datetime) -> tuple[datetime, bool]:
+    """Track a consecutive ban; return (next-probe time, is-first-in-streak).
+
+    The instant a ban window lifts, a region/IP block re-bans us — so we back
+    off exponentially (1h, 2h, 4h … capped at 24h) past the ban window instead
+    of probing again immediately. The caller persists via ``_set_cache``.
+    """
+    global _consecutive_bans
+    _consecutive_bans += 1
+    ban_expiry = datetime.fromtimestamp(banned_until_ms / 1000, tz=UTC)
+    backoff = timedelta(hours=min(2 ** (_consecutive_bans - 1), _MAX_BAN_BACKOFF_HOURS))
+    return max(ban_expiry, now + backoff), _consecutive_bans == 1
+
+
+def _reset_ban_streak() -> None:
+    """Clear backoff + alert silence after a successful fetch.
+
+    Resets the silence window too so a fresh ban after a recovery alerts again.
+    The following ``_set_cache`` persists the cleared counter.
+    """
+    global _ban_alert_silenced_until_ms, _consecutive_bans
+    _consecutive_bans = 0
+    _ban_alert_silenced_until_ms = 0
+
+
 def _reset_state_for_tests() -> None:
-    global _ban_alert_silenced_until_ms, _state_loaded, _state_path
+    global _ban_alert_silenced_until_ms, _consecutive_bans, _state_loaded, _state_path
     _cache.clear()
     _ban_alert_silenced_until_ms = 0
+    _consecutive_bans = 0
     _state_loaded = True
     _state_path = None
 
