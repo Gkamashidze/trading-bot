@@ -320,7 +320,12 @@ async def route_signal(result: StrategyResult) -> None:
         fill_latency_ms = (datetime.now(UTC) - signal_time).total_seconds() * 1000
         from trading_bot.tca.tracker import OrderOutcome, get_tca_tracker
 
-        get_tca_tracker().record(
+        outcome = (
+            OrderOutcome.PARTIAL
+            if order_status == OrderStatus.PARTIALLY_FILLED
+            else OrderOutcome.FILLED
+        )
+        fill_record = get_tca_tracker().record(
             order_id=order.client_order_id,
             symbol=order.symbol,
             side=order.side.value,
@@ -328,24 +333,45 @@ async def route_signal(result: StrategyResult) -> None:
             fill_price=float(actual_price),
             quantity=float(actual_filled_qty),
             latency_ms=fill_latency_ms,
-            outcome=(
-                OrderOutcome.PARTIAL
-                if order_status == OrderStatus.PARTIALLY_FILLED
-                else OrderOutcome.FILLED
-            ),
+            outcome=outcome,
         )
 
         # ── Accounting: record trade lot + FIFO PnL ───────────────────────
         from trading_bot.accounting.ledger import get_accounting_ledger
 
         fee_usdt = float(actual_filled_qty) * float(actual_price) * 0.001  # taker 0.1%
-        get_accounting_ledger().record_trade(
+        ledger = get_accounting_ledger()
+        lot = ledger.record_trade(
             symbol=order.symbol,
             side=order.side.value,
             quantity=actual_filled_qty,
             price=actual_price,
             fee_usdt=fee_usdt,
             order_id=order.client_order_id,
+        )
+        realized = ledger.realized_for_sell(lot.lot_id) if order.side == OrderSide.SELL else None
+        realized_pnl, cost_basis = realized if realized is not None else (None, None)
+
+        # ── Evidence: persist TCA + accounting record for Gate 0 ──────────
+        from trading_bot.evidence.recorder import record_fill_evidence
+
+        await record_fill_evidence(
+            order_id=order.client_order_id,
+            symbol=order.symbol,
+            strategy_id=order.strategy_id or "",
+            side=order.side.value,
+            signal_price=fill_price,
+            fill_price=actual_price,
+            quantity=actual_filled_qty,
+            fee_paid=fee_usdt,
+            slippage_pct=fill_record.slippage_pct,
+            slippage_usdt=fill_record.slippage_usdt,
+            latency_ms=fill_latency_ms,
+            quality_score=fill_record.quality_score.value,
+            outcome=outcome.value,
+            realized_pnl=realized_pnl,
+            cost_basis=cost_basis,
+            lot_id=lot.lot_id,
         )
 
     except Exception as e:

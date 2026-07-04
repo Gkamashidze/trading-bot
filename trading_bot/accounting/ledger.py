@@ -180,6 +180,20 @@ class AccountingLedger:
                 )
                 open_q[0] = reduced
 
+    def realized_for_sell(self, sell_lot_id: str) -> tuple[Decimal, Decimal] | None:
+        """Return (total_pnl, total_cost_basis) realized by a sell lot, or None.
+
+        A single SELL may FIFO-match several open BUY lots, producing multiple
+        RealizedPnL entries — this aggregates them. Used by the evidence recorder
+        to populate realized_pnl / cost_basis on a completed round-trip.
+        """
+        entries = [e for e in self._realized if e.sell_lot_id == sell_lot_id]
+        if not entries:
+            return None
+        total_pnl = sum((e.pnl for e in entries), _ZERO)
+        total_cost = sum((e.cost_basis for e in entries), _ZERO)
+        return total_pnl, total_cost
+
     def total_realized_pnl(self, symbol: str | None = None) -> Decimal:
         entries = (
             self._realized if symbol is None else [e for e in self._realized if e.symbol == symbol]

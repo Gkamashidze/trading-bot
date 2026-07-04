@@ -665,6 +665,18 @@ class EvidenceStore:
             )
         return [dict(r) for r in rows]
 
+    async def count_round_trips(self, session_id: uuid.UUID) -> int:
+        """Count completed round-trip trades (SELLs that realised PnL) for a session."""
+        async with self._pool.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM evidence_accounting_records
+                WHERE session_id = $1 AND realized_pnl IS NOT NULL
+                """,
+                session_id,
+            )
+        return int(count or 0)
+
     async def get_session_report(self, session_id: uuid.UUID) -> dict[str, Any]:
         """Return a summary dict combining all evidence for a session."""
         async with self._pool.acquire() as conn:
@@ -683,6 +695,13 @@ class EvidenceStore:
 
             trade_count = await conn.fetchval(
                 "SELECT COUNT(*) FROM evidence_tca_records WHERE session_id = $1",
+                session_id,
+            )
+            round_trip_count = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM evidence_accounting_records
+                WHERE session_id = $1 AND realized_pnl IS NOT NULL
+                """,
                 session_id,
             )
             portfolio_count = await conn.fetchval(
@@ -712,6 +731,7 @@ class EvidenceStore:
         return {
             "session": dict(session_row),
             "trade_count": trade_count,
+            "round_trip_count": round_trip_count,
             "portfolio_snapshot_count": portfolio_count,
             "signal_snapshot_count": signal_count,
             "reconciliation_critical_count": recon_critical,

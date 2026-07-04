@@ -183,6 +183,14 @@ async def refresh_signals() -> list[StrategyResult]:
     _last_results = all_results
     _last_computed_at = datetime.now(UTC)
 
+    # Persist signal evidence for Gate 0 (best-effort, never breaks the refresh)
+    try:
+        from trading_bot.evidence.recorder import record_signal_evidence
+
+        await record_signal_evidence(all_results)
+    except Exception as e:
+        log.error("evidence_signal_recording_error", error=str(e))
+
     # Route signals to paper exchange (lazy import avoids circular dependency)
     try:
         from trading_bot.execution.router import route_signals
