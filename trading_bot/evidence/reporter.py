@@ -103,6 +103,15 @@ class EvidenceReporter:
         # Build per-strategy trade counts from signal snapshots (best-effort)
         strategy_metrics: dict[str, Any] = {}
 
+        # Parity score (paper↔backtest) — best-effort; None if not enough data
+        parity_score: Decimal | None = None
+        try:
+            from trading_bot.parity.evidence_parity import compute_parity_score
+
+            parity_score = await compute_parity_score(self._store._pool)
+        except Exception as exc:
+            log.warning("evidence_weekly_parity_failed", error=str(exc))
+
         summary = WeeklyEvidenceSummary(
             session_id=session_id,
             week_start=week_start,
@@ -115,6 +124,7 @@ class EvidenceReporter:
             trade_count=trade_count,
             rejected_order_count=rejected_count,
             partial_fill_count=partial_count,
+            parity_score=parity_score,
             strategy_metrics=strategy_metrics,
             incidents=[],
             generated_at=_now(),
@@ -243,7 +253,7 @@ class EvidenceReporter:
                     passed=float(parity_score) >= min_parity_score,
                     actual_value=f"{float(parity_score):.2f}",
                     threshold=f">= {min_parity_score:.2f}",
-                    detail="TODO: parity score computed by promotion pipeline",
+                    detail="paper↔backtest parity (win_rate + drawdown), computed weekly",
                 )
             )
 
