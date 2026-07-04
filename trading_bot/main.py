@@ -181,6 +181,20 @@ async def _startup() -> tuple[
                     session_id=str(ev_session.session_id),
                     status=ev_session.status,
                 )
+
+                # Backfill evidence from paper_orders (one-shot, idempotent).
+                # Weeks of paper fills predate the evidence recorder — reconstruct
+                # them so the Gate 0 report reflects real trading activity.
+                from trading_bot.evidence.backfill import (
+                    backfill_evidence_from_paper_orders,
+                    needs_backfill,
+                )
+
+                if await needs_backfill(pool, ev_session.session_id):
+                    _n = await backfill_evidence_from_paper_orders(
+                        pool, ev_store, ev_session.session_id
+                    )
+                    log.info("evidence_backfill_ran", rows_inserted=_n)
             except Exception as ev_exc:
                 log.warning("evidence_session_start_failed", error=str(ev_exc))
     else:
