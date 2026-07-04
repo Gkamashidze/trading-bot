@@ -97,3 +97,12 @@ Thumbs.db
 # Keep .secrets.baseline in git (it's a whitelist of known-false-positives)
 trading_bot/data 2/
 .claude/scheduled_tasks.lock
+
+# ── Other AI tooling (Codex, etc.) ────────────────────────────────────────────
+.agents/
+.codex/
+AGENTS.md
+
+# ── iCloud duplicate-directory artifacts ("* 2") ──────────────────────────────
+* 2/
+*\ 2
