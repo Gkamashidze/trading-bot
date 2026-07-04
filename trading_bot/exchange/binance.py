@@ -34,6 +34,12 @@ from trading_bot.core.exceptions import (
     ExchangeBannedError,
     ExchangeConnectionError,
     ExchangeRateLimitError,
+    OrderRejectedError,
+)
+from trading_bot.core.models import OrderRequest, OrderType
+from trading_bot.exchange.precision import (
+    OrderPrecisionValidator,
+    SymbolConstraints,
 )
 from trading_bot.exchange.rate_limit import (
     check_circuit,
@@ -73,6 +79,8 @@ class BinanceExchange(ExchangeInterface):
         self._testnet = testnet
         self._retry_attempts = retry_attempts
         self._retry_backoff_base = retry_backoff_base
+        self._validator = OrderPrecisionValidator()
+        self._constraints_cache: dict[str, SymbolConstraints] = {}
 
         config: dict[str, Any] = {
             "apiKey": api_key or None,
@@ -81,18 +89,21 @@ class BinanceExchange(ExchangeInterface):
             "enableRateLimit": True,
             # Restrict metadata discovery to spot. The default CCXT Binance
             # configuration also loads futures and delivery market catalogs.
-            "options": {"defaultType": "spot", "fetchMarkets": {"types": ["spot"]}},
+            "options": {
+                "defaultType": "spot",
+                "fetchMarkets": {"types": ["spot"]},
+                # Pass base-asset amount for market BUYs (not quote quantity),
+                # matching how the router sizes orders in base units.
+                "createMarketBuyOrderRequiresPrice": False,
+            },
         }
 
-        if testnet:
-            config["urls"] = {
-                "api": {
-                    "public": "https://testnet.binance.vision/api",
-                    "private": "https://testnet.binance.vision/api",
-                }
-            }
-
         self._client = ccxt.binance(config)
+        if testnet:
+            # Use CCXT's sandbox switch — it sets the correct spot-testnet URLs
+            # (testnet.binance.vision/api/v3/...). A manual urls override misses
+            # the version path and 404s on exchangeInfo/ticker/order endpoints.
+            self._client.set_sandbox_mode(True)
         log.info(
             "binance_adapter_created",
             testnet=testnet,
@@ -296,11 +307,118 @@ class BinanceExchange(ExchangeInterface):
                 raise self._handle_ccxt_error(e) from e
         return cast(dict[str, Any], markets.get(symbol, {}))
 
+    # ── Order operations ──────────────────────────────────────────────────────
+    #
+    # place_order submits a REAL order to the configured endpoint (testnet when
+    # testnet=True, otherwise live). It is deliberately gated upstream: the router
+    # only routes to a live exchange when live_trading_enabled is true AND the
+    # micro-live gate approves. On testnet this exercises the full order pipeline
+    # with fake money and zero financial risk.
+
+    async def _symbol_constraints(self, symbol: str) -> SymbolConstraints | None:
+        """Load and cache LOT_SIZE / tick / MIN_NOTIONAL constraints for a symbol."""
+        cached = self._constraints_cache.get(symbol)
+        if cached is not None:
+            return cached
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                markets = await self._client.load_markets()
+                self._record_rate_limit_headers()
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
+        constraints = _constraints_from_market(cast(dict[str, Any], markets.get(symbol, {})))
+        if constraints is not None:
+            self._constraints_cache[symbol] = constraints
+        return constraints
+
+    async def _reference_price(self, symbol: str) -> Decimal | None:
+        """Return the last traded price (for notional validation of market orders)."""
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                ticker = await self._client.fetch_ticker(symbol)
+                self._record_rate_limit_headers()
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
+        last = ticker.get("last") or ticker.get("close")
+        return Decimal(str(last)) if last else None
+
     async def place_order(self, order: Any) -> dict[str, Any]:
-        raise NotImplementedError("Stage 0: order placement not yet enabled. See Stage 5.")
+        """Submit a real spot order after quantizing to exchange constraints.
+
+        Fails closed if constraints cannot be loaded or the order violates
+        LOT_SIZE / MIN_NOTIONAL. The client_order_id is passed through as Binance
+        newClientOrderId so retries are idempotent exchange-side.
+        """
+        req: OrderRequest = order
+        constraints = await self._symbol_constraints(req.symbol)
+        ref_price = req.limit_price or await self._reference_price(req.symbol)
+        if ref_price is None:
+            raise OrderRejectedError(f"no reference price available for {req.symbol}")
+
+        validation = self._validator.validate(req.symbol, req.quantity, ref_price, constraints)
+        if not validation.approved:
+            raise OrderRejectedError(validation.reason)
+        adj_qty = validation.adjusted_qty or req.quantity
+
+        price_arg = float(req.limit_price) if req.order_type == OrderType.LIMIT else None
+        params = {"newClientOrderId": req.client_order_id[:36]}
+
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            with (
+                start_span(
+                    "exchange.place_order",
+                    {"exchange": "binance", "symbol": req.symbol, "side": req.side.value},
+                ),
+                API_LATENCY.labels(exchange="binance", method="place_order").time(),
+            ):
+                try:
+                    raw = await self._client.create_order(
+                        req.symbol,
+                        req.order_type.value,
+                        req.side.value,
+                        float(adj_qty),
+                        price_arg,
+                        params,
+                    )
+                    self._record_rate_limit_headers()
+                except Exception as e:
+                    raise self._handle_ccxt_error(e) from e
+
+        log.info(
+            "binance_order_placed",
+            symbol=req.symbol,
+            side=req.side.value,
+            requested_qty=str(req.quantity),
+            adjusted_qty=str(adj_qty),
+            testnet=self._testnet,
+            order_id=str(raw.get("id", "")),
+        )
+        return _parse_order_response(cast(dict[str, Any], raw), adj_qty)
 
     async def cancel_order(self, exchange_order_id: str, symbol: str) -> dict[str, Any]:
-        raise NotImplementedError("Stage 0: order cancellation not yet enabled. See Stage 5.")
+        """Cancel an open order by its exchange order id."""
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                raw = await self._client.cancel_order(exchange_order_id, symbol)
+                self._record_rate_limit_headers()
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
+        return cast(dict[str, Any], raw)
+
+    async def get_order_status(self, exchange_order_id: str, symbol: str) -> dict[str, Any]:
+        """Poll an order's current status (fallback when no WebSocket fill arrives)."""
+        async with request_slot("binance"):
+            self._assert_request_allowed()
+            try:
+                raw = await self._client.fetch_order(exchange_order_id, symbol)
+                self._record_rate_limit_headers()
+            except Exception as e:
+                raise self._handle_ccxt_error(e) from e
+        return cast(dict[str, Any], raw)
 
     async def health_check(self) -> bool:
         """Verify Binance is reachable and (if configured) credentials are valid.
@@ -326,6 +444,57 @@ class BinanceExchange(ExchangeInterface):
                 self._handle_ccxt_error(e)
                 log.warning("binance_health_failed", error=str(e), testnet=self._testnet)
                 return False
+
+
+def _constraints_from_market(market: dict[str, Any]) -> SymbolConstraints | None:
+    """Build SymbolConstraints from a CCXT market dict (Binance uses TICK_SIZE mode)."""
+    if not market:
+        return None
+    try:
+        limits = market.get("limits", {})
+        precision = market.get("precision", {})
+        amount_limits = limits.get("amount") or {}
+        cost_limits = limits.get("cost") or {}
+        qty_step = precision.get("amount")
+        tick = precision.get("price")
+        if qty_step is None or tick is None:
+            return None
+        return SymbolConstraints(
+            symbol=market["symbol"],
+            base_asset=market.get("base", ""),
+            quote_asset=market.get("quote", ""),
+            min_qty=Decimal(str(amount_limits.get("min") or "0")),
+            max_qty=Decimal(str(amount_limits.get("max") or "999999999")),
+            qty_step=Decimal(str(qty_step)),
+            tick_size=Decimal(str(tick)),
+            min_notional=Decimal(str(cost_limits.get("min") or "0")),
+        )
+    except Exception:
+        return None
+
+
+def _parse_order_response(raw: dict[str, Any], requested_qty: Decimal) -> dict[str, Any]:
+    """Normalise a CCXT order response into the router's expected fill dict."""
+    filled = Decimal(str(raw.get("filled") or 0))
+    avg = raw.get("average") or raw.get("price")
+    fill_price = Decimal(str(avg)) if avg else Decimal("0")
+    fee = raw.get("fee")
+    fee_paid = Decimal(str(fee.get("cost") or 0)) if isinstance(fee, dict) and fee else Decimal("0")
+    if filled <= 0:
+        status = "pending"
+    elif filled < requested_qty:
+        status = "partially_filled"
+    else:
+        status = "filled"
+    return {
+        "exchange_order_id": str(raw.get("id") or ""),
+        "fill_price": str(fill_price),
+        "filled_quantity": str(filled),
+        "fee_paid": str(fee_paid),
+        "slippage_cost": "0",
+        "status": status,
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
 
 
 def _timeframe_to_ms(timeframe: str) -> int:
