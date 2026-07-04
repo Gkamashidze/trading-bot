@@ -133,6 +133,15 @@ async def _startup() -> tuple[
         tracker = init_tracker(pool)
         await tracker.load_recent()
 
+        # Reconciler — OMS↔exchange consistency check (paper: vs PaperExchange).
+        # Registered so the scheduled reconciliation job + router gate are live.
+        from trading_bot.core.models import ExchangeId
+        from trading_bot.execution.paper import PaperExchange
+        from trading_bot.oms.reconciler import Reconciler, set_reconciler
+
+        set_reconciler(Reconciler(exchange=PaperExchange(), exchange_id=ExchangeId.BINANCE))
+        log.info("reconciler_initialized", exchange="binance", mode="paper")
+
         # ── Portfolio crash-recovery restore ─────────────────────────────────
         # 1. Load latest on-disk snapshot (hourly, /data/snapshots/).
         # 2. Replay any paper_orders fills that arrived after the snapshot.

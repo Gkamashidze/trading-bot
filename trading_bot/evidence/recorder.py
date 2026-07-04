@@ -25,6 +25,8 @@ from decimal import Decimal
 
 from trading_bot.evidence.models import (
     AccountingEvidenceRecord,
+    ReconciliationEvidenceReport,
+    ReconciliationSeverity,
     SignalEvidenceSnapshot,
     TCAEvidenceRecord,
 )
@@ -34,6 +36,7 @@ from trading_bot.evidence.store import (
     get_evidence_store,
 )
 from trading_bot.observability.logging import get_logger
+from trading_bot.oms.reconciler import ReconciliationReport
 from trading_bot.strategies.base import StrategyResult
 
 log = get_logger(__name__)
@@ -166,3 +169,32 @@ async def record_signal_evidence(results: Iterable[StrategyResult]) -> None:
                 strategy_id=r.strategy_id,
                 error=str(exc),
             )
+
+
+async def record_reconciliation_evidence(report: ReconciliationReport) -> None:
+    """Persist a reconciliation run as a ReconciliationEvidenceReport.
+
+    Idempotency key buckets by run minute so a coalesced double-fire dedupes.
+    """
+    active = _active_store()
+    if active is None:
+        return
+    store, session_id = active
+    bucket = report.run_at.strftime("%Y%m%d%H%M")
+
+    try:
+        await store.insert_reconciliation_report(
+            ReconciliationEvidenceReport(
+                session_id=session_id,
+                run_at=report.run_at,
+                severity=ReconciliationSeverity(report.severity.value),
+                order_discrepancies=list(report.order_discrepancies),
+                balance_discrepancies=list(report.balance_discrepancies),
+                position_discrepancies=list(report.position_discrepancies),
+                orders_blocked=report.orders_blocked,
+                mismatch_count=report.mismatch_count,
+                idempotency_key=_idem("recon", bucket),
+            )
+        )
+    except Exception as exc:  # never break the scheduler on an evidence write
+        log.warning("evidence_reconciliation_record_failed", error=str(exc))

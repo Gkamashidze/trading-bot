@@ -487,6 +487,33 @@ async def circuit_breaker_monitor_job() -> None:
     log.info("circuit_breaker_monitor_job_complete", tier=tier, drawdown_pct=cb.last_drawdown_pct)
 
 
+async def reconciliation_job() -> None:
+    """Run OMS↔exchange reconciliation and persist the report to evidence.
+
+    For paper trading the exchange is PaperExchange, whose balances mirror the
+    portfolio manager, so a clean run confirms OMS/portfolio internal
+    consistency — exactly the "reconciliation clean" evidence Gate 0 requires.
+    """
+    from trading_bot.oms.reconciler import get_reconciler
+
+    reconciler = get_reconciler()
+    if reconciler is None:
+        log.warning("reconciliation_job_skipped", reason="no_reconciler")
+        return
+
+    report = await reconciler.run_once()
+    log.info(
+        "reconciliation_job_complete",
+        severity=str(report.severity),
+        orders_blocked=report.orders_blocked,
+        mismatch_count=report.mismatch_count,
+    )
+
+    from trading_bot.evidence.recorder import record_reconciliation_evidence
+
+    await record_reconciliation_evidence(report)
+
+
 async def daily_portfolio_reset_job() -> None:
     """Reset portfolio day-start equity and circuit breaker state. Runs at UTC midnight."""
     from trading_bot.portfolio.manager import get_portfolio_manager
@@ -739,6 +766,15 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
         minutes=5,
         id="circuit_breaker_monitor",
         name="Circuit breaker drawdown monitor (5 min)",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        reconciliation_job,
+        trigger="interval",
+        minutes=30,
+        id="reconciliation",
+        name="OMS↔exchange reconciliation + evidence (30 min)",
         replace_existing=True,
     )
 

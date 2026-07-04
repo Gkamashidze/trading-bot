@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +23,8 @@ import pytest
 from trading_bot.accounting.ledger import AccountingLedger
 from trading_bot.evidence import recorder
 from trading_bot.evidence.store import EvidenceStore
+from trading_bot.oms.reconciler import ReconciliationReport
+from trading_bot.oms.reconciler import ReconciliationSeverity as OmsSeverity
 from trading_bot.strategies.base import StrategyResult
 
 _SESSION = uuid.uuid4()
@@ -32,6 +35,7 @@ def _mock_store() -> MagicMock:
     store.insert_tca_record = AsyncMock(return_value=True)
     store.insert_accounting_record = AsyncMock(return_value=True)
     store.insert_signal_snapshot = AsyncMock(return_value=True)
+    store.insert_reconciliation_report = AsyncMock(return_value=True)
     return store
 
 
@@ -223,3 +227,71 @@ class TestCountRoundTrips:
         assert count == 7
         sql = mock_conn.fetchval.await_args.args[0]
         assert "realized_pnl IS NOT NULL" in sql
+
+
+# ---------------------------------------------------------------------------
+# record_reconciliation_evidence
+# ---------------------------------------------------------------------------
+
+
+def _report(severity: OmsSeverity, **kw: Any) -> ReconciliationReport:
+    base: dict[str, Any] = {
+        "severity": severity,
+        "order_discrepancies": [],
+        "balance_discrepancies": [],
+        "position_discrepancies": [],
+        "orders_blocked": False,
+        "run_at": datetime.now(UTC),
+        "run_count": 1,
+        "mismatch_count": 0,
+    }
+    base.update(kw)
+    return ReconciliationReport(**base)
+
+
+class TestRecordReconciliationEvidence:
+    @pytest.mark.asyncio
+    async def test_persists_clean_report(self) -> None:
+        store = _mock_store()
+        with (
+            patch.object(recorder, "get_current_session_id", return_value=_SESSION),
+            patch.object(recorder, "get_evidence_store", return_value=store),
+        ):
+            await recorder.record_reconciliation_evidence(_report(OmsSeverity.OK))
+
+        store.insert_reconciliation_report.assert_awaited_once()
+        rpt = store.insert_reconciliation_report.await_args.args[0]
+        assert rpt.session_id == _SESSION
+        assert rpt.severity.value == "ok"
+
+    @pytest.mark.asyncio
+    async def test_maps_critical_severity_and_discrepancies(self) -> None:
+        store = _mock_store()
+        with (
+            patch.object(recorder, "get_current_session_id", return_value=_SESSION),
+            patch.object(recorder, "get_evidence_store", return_value=store),
+        ):
+            await recorder.record_reconciliation_evidence(
+                _report(
+                    OmsSeverity.CRITICAL,
+                    balance_discrepancies=["USDT balance CRITICAL drift"],
+                    orders_blocked=True,
+                    mismatch_count=3,
+                )
+            )
+
+        rpt = store.insert_reconciliation_report.await_args.args[0]
+        assert rpt.severity.value == "critical"
+        assert rpt.orders_blocked is True
+        assert rpt.mismatch_count == 3
+        assert rpt.balance_discrepancies == ["USDT balance CRITICAL drift"]
+
+    @pytest.mark.asyncio
+    async def test_noop_when_no_session(self) -> None:
+        store = _mock_store()
+        with (
+            patch.object(recorder, "get_current_session_id", return_value=None),
+            patch.object(recorder, "get_evidence_store", return_value=store),
+        ):
+            await recorder.record_reconciliation_evidence(_report(OmsSeverity.OK))
+        store.insert_reconciliation_report.assert_not_awaited()
