@@ -1,6 +1,6 @@
 # Walk-Forward Backtest — sma_crossover on BTC/USDT
 
-_Generated: 2026-07-04 20:46 UTC · Out-of-sample span: 2022-06-30 00:00 → 2026-06-30 23:00 · 48 walk-forward windows_
+_Generated: 2026-07-04 21:09 UTC · Out-of-sample span: 2022-06-30 00:00 → 2026-06-30 23:00 · 48 walk-forward windows_
 
 ## Verdict
 

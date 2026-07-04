@@ -91,10 +91,11 @@ def _optimise_params(
     factory: StrategyFactory,
     param_grid: Sequence[dict[str, Any]],
     config: BacktestConfig,
+    min_train_trades: int = _MIN_TRAIN_TRADES,
 ) -> tuple[dict[str, Any], float]:
     """Return the (params, in-sample Sharpe) with the best Sharpe on the train window.
 
-    A param set must produce at least _MIN_TRAIN_TRADES trades to be eligible —
+    A param set must produce at least ``min_train_trades`` trades to be eligible —
     otherwise a strategy that barely trades can post a misleadingly high Sharpe.
     Falls back to the first grid entry if nothing qualifies.
     """
@@ -112,7 +113,7 @@ def _optimise_params(
         except Exception:  # noqa: S112 — a degenerate param combo, just skip it
             continue
         m = result.metrics
-        if m.total_trades < _MIN_TRAIN_TRADES:
+        if m.total_trades < min_train_trades:
             continue
         if m.sharpe_ratio > best_sharpe:
             best_sharpe = m.sharpe_ratio
@@ -153,6 +154,7 @@ def run_walk_forward(
     train_bars: int,
     test_bars: int,
     config: BacktestConfig | None = None,
+    min_train_trades: int = _MIN_TRAIN_TRADES,
 ) -> WalkForwardResult:
     """Run a rolling walk-forward and return the honest OOS result vs buy-and-hold."""
     cfg = config or BacktestConfig()
@@ -168,7 +170,9 @@ def run_walk_forward(
     p = train_bars
     while p + test_bars <= n:
         train_slice = data.iloc[p - train_bars : p]
-        best_params, train_sharpe = _optimise_params(train_slice, factory, param_grid, cfg)
+        best_params, train_sharpe = _optimise_params(
+            train_slice, factory, param_grid, cfg, min_train_trades
+        )
 
         # Signals computed on full history (trailing indicators → no look-ahead),
         # then sliced to this test segment only.

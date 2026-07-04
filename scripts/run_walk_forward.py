@@ -24,6 +24,11 @@ sys.path.insert(0, str(_ROOT))
 from trading_bot.backtesting.config import BacktestConfig  # noqa: E402
 from trading_bot.backtesting.walk_forward import run_walk_forward  # noqa: E402
 from trading_bot.backtesting.wf_report import write_reports  # noqa: E402
+from trading_bot.strategies.candidates import (  # noqa: E402
+    DonchianBreakoutStrategy,
+    MacdStrategy,
+    TrendFilterStrategy,
+)
 from trading_bot.strategies.rsi_mean_reversion import RsiMeanReversionStrategy  # noqa: E402
 from trading_bot.strategies.sma_crossover import SmaCrossoverStrategy  # noqa: E402
 
@@ -54,6 +59,29 @@ def _rsi_grid() -> list[dict[str, float]]:
     return grid
 
 
+def _trend_grid() -> list[dict[str, int]]:
+    # SMA regime period in hours: 20 / 50 / 100 / 150 days.
+    return [{"period": d * 24} for d in (20, 50, 100, 150)]
+
+
+def _donchian_grid() -> list[dict[str, int]]:
+    grid = []
+    for entry_d in (20, 40, 55):
+        for exit_d in (10, 20):
+            grid.append({"entry": entry_d * 24, "exit_period": exit_d * 24})
+    return grid
+
+
+def _macd_grid() -> list[dict[str, int]]:
+    grid = []
+    for fast in (12, 24, 48):
+        for slow in (52, 96):
+            for signal in (9, 18):
+                if fast < slow:
+                    grid.append({"fast": fast, "slow": slow, "signal": signal})
+    return grid
+
+
 def _load_bars() -> pd.DataFrame:
     files = sorted(glob.glob(_DATA_GLOB))
     if not files:
@@ -67,18 +95,17 @@ def main() -> None:
     cfg = BacktestConfig(annual_trading_days=_HOURS_PER_YEAR, fill_rng_seed=7)
     generated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
+    # (strategy_id, factory, param_grid, min_train_trades)
     specs = [
-        ("sma_crossover", "SMA", lambda p: SmaCrossoverStrategy(**p), _sma_grid()),
-        (
-            "rsi_mean_reversion",
-            "RSI",
-            lambda p: RsiMeanReversionStrategy(**p),
-            _rsi_grid(),
-        ),
+        ("sma_crossover", lambda p: SmaCrossoverStrategy(**p), _sma_grid(), 5),
+        ("rsi_mean_reversion", lambda p: RsiMeanReversionStrategy(**p), _rsi_grid(), 5),
+        ("trend_filter", lambda p: TrendFilterStrategy(**p), _trend_grid(), 3),
+        ("donchian_breakout", lambda p: DonchianBreakoutStrategy(**p), _donchian_grid(), 3),
+        ("macd", lambda p: MacdStrategy(**p), _macd_grid(), 5),
     ]
 
     print(f"Loaded {len(bars)} bars {bars['open_time'].min()} -> {bars['open_time'].max()}\n")
-    for strategy_id, _label, factory, grid in specs:
+    for strategy_id, factory, grid, min_trades in specs:
         result = run_walk_forward(
             bars,
             strategy_id=strategy_id,
@@ -88,6 +115,7 @@ def main() -> None:
             train_bars=_TRAIN_BARS,
             test_bars=_TEST_BARS,
             config=cfg,
+            min_train_trades=min_trades,
         )
         paths = write_reports(result, _OUTDIR, generated_at=generated_at)
         oos, bench = result.oos_metrics, result.benchmark_metrics
