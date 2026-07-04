@@ -332,8 +332,8 @@ class BinanceExchange(ExchangeInterface):
             self._constraints_cache[symbol] = constraints
         return constraints
 
-    async def _reference_price(self, symbol: str) -> Decimal | None:
-        """Return the last traded price (for notional validation of market orders)."""
+    async def reference_price(self, symbol: str) -> Decimal | None:
+        """Return the last traded price (for notional validation / order sizing)."""
         async with request_slot("binance"):
             self._assert_request_allowed()
             try:
@@ -353,7 +353,7 @@ class BinanceExchange(ExchangeInterface):
         """
         req: OrderRequest = order
         constraints = await self._symbol_constraints(req.symbol)
-        ref_price = req.limit_price or await self._reference_price(req.symbol)
+        ref_price = req.limit_price or await self.reference_price(req.symbol)
         if ref_price is None:
             raise OrderRejectedError(f"no reference price available for {req.symbol}")
 

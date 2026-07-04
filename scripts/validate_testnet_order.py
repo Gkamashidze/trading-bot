@@ -43,7 +43,7 @@ async def _run() -> None:
         # ── Read-only: always runs (no auth needed) ───────────────────────────
         markets = await ex._client.load_markets()
         constraints = _constraints_from_market(markets.get(_SYMBOL, {}))
-        price = await ex._reference_price(_SYMBOL)
+        price = await ex.reference_price(_SYMBOL)
         print(f"[read-only] {_SYMBOL} testnet price = {price}")
         print(
             f"[read-only] constraints: step={constraints.qty_step} "
