@@ -50,7 +50,8 @@ def _schedule_persist(coro: Coroutine[Any, Any, None]) -> None:
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
-        pass
+        coro.close()
+        log.warning("experiment_persist_not_scheduled", reason="no_running_event_loop")
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ class ExperimentRegistry:
             strategy_id=strategy_id,
             fingerprint=artifact.fingerprint[:12],
         )
-        _schedule_persist(self._persist(artifact))
+        self._persist_later(artifact)
         return artifact
 
     def approve(self, experiment_id: str, approved_by: str) -> ExperimentArtifact:
@@ -176,7 +177,7 @@ class ExperimentRegistry:
         )
         self._store[experiment_id] = updated
         log.info("experiment_approved", experiment_id=experiment_id, approved_by=approved_by)
-        _schedule_persist(self._persist(updated))
+        self._persist_later(updated)
         return updated
 
     def archive(self, experiment_id: str) -> ExperimentArtifact:
@@ -198,7 +199,7 @@ class ExperimentRegistry:
         )
         self._store[experiment_id] = updated
         log.info("experiment_archived", experiment_id=experiment_id)
-        _schedule_persist(self._persist(updated))
+        self._persist_later(updated)
         return updated
 
     def get(self, experiment_id: str) -> ExperimentArtifact | None:
@@ -225,6 +226,11 @@ class ExperimentRegistry:
 
     def __len__(self) -> int:
         return len(self._store)
+
+    def _persist_later(self, artifact: ExperimentArtifact) -> None:
+        if self._pool is None:
+            return
+        _schedule_persist(self._persist(artifact))
 
     # ── DB persistence ────────────────────────────────────────────────────────
 
