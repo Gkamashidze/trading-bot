@@ -68,6 +68,9 @@ class GoLiveGate:
         pool: Any = None,
         reconciler_last_run_clean: bool = False,
         paper_trading_days: int = 0,
+        paper_round_trips: int = 0,
+        min_paper_days: int = 0,
+        min_round_trips: int = 0,
         paper_win_rate: float | None = None,
         paper_drawdown_pct: float | None = None,
         backtest_win_rate: float | None = None,
@@ -81,6 +84,9 @@ class GoLiveGate:
         self._pool = pool
         self._reconciler_last_run_clean = reconciler_last_run_clean
         self._paper_trading_days = paper_trading_days
+        self._paper_round_trips = paper_round_trips
+        self._min_paper_days = min_paper_days
+        self._min_round_trips = min_round_trips
         self._paper_win_rate = paper_win_rate
         self._paper_drawdown_pct = paper_drawdown_pct
         self._backtest_win_rate = backtest_win_rate
@@ -320,6 +326,7 @@ class GoLiveGate:
 
         evaluator = {
             "dry_run_completed": self._check_dry_run,
+            "paper_evidence_thresholds": self._check_paper_evidence,
             "paper_live_parity": self._check_paper_parity,
             "risk_sign_off": self._check_risk_sign_off,
             "rollback_plan_present": self._check_rollback_plan,
@@ -356,6 +363,26 @@ class GoLiveGate:
             CriterionStatus.FAIL,
             f"need ≥7 paper trading days, have {self._paper_trading_days}",
         )
+
+    async def _check_paper_evidence(self) -> tuple[CriterionStatus, str]:
+        days_ok = self._paper_trading_days >= self._min_paper_days
+        trips_ok = self._paper_round_trips >= self._min_round_trips
+        if days_ok and trips_ok:
+            return (
+                CriterionStatus.PASS,
+                f"{self._paper_trading_days} days (≥{self._min_paper_days}), "
+                f"{self._paper_round_trips} round-trips (≥{self._min_round_trips})",
+            )
+        reasons = []
+        if not days_ok:
+            reasons.append(
+                f"{self._paper_trading_days} paper days < {self._min_paper_days} required"
+            )
+        if not trips_ok:
+            reasons.append(
+                f"{self._paper_round_trips} round-trips < {self._min_round_trips} required"
+            )
+        return CriterionStatus.FAIL, "; ".join(reasons)
 
     async def _check_paper_parity(self) -> tuple[CriterionStatus, str]:
         if self._paper_win_rate is None or self._backtest_win_rate is None:

@@ -52,6 +52,11 @@ def set_default_store(store: FeatureFlagStore) -> None:
     _default_store = store
 
 
+def get_default_store() -> FeatureFlagStore | None:
+    """Return the module-level default flag store (None if not configured)."""
+    return _default_store
+
+
 async def is_enabled(flag_name: str) -> bool:
     """Check a feature flag using the module-level default store."""
     if _default_store is None:

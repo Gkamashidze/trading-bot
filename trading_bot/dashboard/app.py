@@ -800,6 +800,17 @@ def create_app() -> FastAPI:
         report = await reporter.generate_final_report(session_id)
         return JSONResponse(report.model_dump(mode="json"))
 
+    @app.get("/go_live/report", response_class=JSONResponse)
+    async def go_live_report() -> JSONResponse:
+        """Evaluate the go-live readiness gate (read-only; never enables live)."""
+        if _pool is None:
+            return JSONResponse({"error": "db_not_connected"}, status_code=503)
+        from trading_bot.go_live.builder import build_go_live_gate
+
+        gate = await build_go_live_gate(_pool)
+        report = await gate.evaluate()
+        return JSONResponse(report.model_dump(mode="json"))
+
     @app.get("/evidence/export/json", response_class=JSONResponse)
     async def evidence_export_json(x_api_key: str = "") -> JSONResponse:
         import os

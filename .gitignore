@@ -103,6 +103,7 @@ trading_bot/data 2/
 .codex/
 AGENTS.md
 
-# ── iCloud duplicate-directory artifacts ("* 2") ──────────────────────────────
+# ── iCloud duplicate artifacts ("<name> 2.<ext>", "<dir> 2/") ─────────────────
 * 2/
 *\ 2
+* 2.*

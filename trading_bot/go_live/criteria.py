@@ -91,6 +91,14 @@ STANDARD_CRITERIA: list[GoLiveCriterion] = [
         ),
     ),
     GoLiveCriterion(
+        criterion_id="paper_evidence_thresholds",
+        label="Paper evidence thresholds",
+        description=(
+            "Paper trading must satisfy Gate 0 evidence minimums: "
+            "≥30 days observed AND ≥100 completed round-trip trades."
+        ),
+    ),
+    GoLiveCriterion(
         criterion_id="paper_live_parity",
         label="Paper/live parity report",
         description=(
