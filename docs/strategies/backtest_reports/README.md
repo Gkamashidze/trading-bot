@@ -23,6 +23,15 @@ on both return and risk-adjusted return (Sharpe):
 Detail per strategy: `*_walk_forward.md` (HTML versions include the equity
 curve).
 
+**Trend Pullback** (STRATEGY_ROADMAP.md §3, ATR-bracket design) was tested
+separately on a new **event-driven bracket engine** (intrabar stops/targets) —
+see `trend_pullback_walk_forward.md`. It also has **no edge**: −11.8% OOS,
+**negative Sharpe (−0.97)**. Its numbers use a different harness + OOS window
+(buy-and-hold reads +219.6% there), so compare it to the baseline **inside its
+own report**, not against the table above. Root cause: the trailing stop cuts
+winners below the 3×ATR target, so the realised payoff never reaches the 2:1
+the design assumed.
+
 The one honest nuance: the **trend filter** cut max drawdown to −37.8% (vs
 buy-and-hold's −53.7%) — genuine downside protection — but still returned less on
 both an absolute and risk-adjusted basis. Lower risk, lower return; not alpha.
