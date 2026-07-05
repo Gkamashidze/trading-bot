@@ -15,6 +15,7 @@ Run:  uv run python scripts/research_trend_pullback.py
 
 from __future__ import annotations
 
+import argparse
 import itertools
 import sys
 from pathlib import Path
@@ -51,6 +52,9 @@ _PARAM_GRID = {
     "tp_atr_mult": [2.0, 3.0, 4.0],
 }
 
+# Toggled by the --h4 CLI flag: require last-closed 4h bar above its EMA (§4).
+_USE_4H = False
+
 
 def _load_bars() -> pd.DataFrame:
     if not _DATA.exists():
@@ -68,7 +72,7 @@ def _run_combo(
     capital: float,
     mask_before: int = 0,
 ) -> BracketResult:
-    params = TrendPullbackParams(oversold_level=oversold)
+    params = TrendPullbackParams(oversold_level=oversold, use_4h_confirmation=_USE_4H)
     sig = compute_trend_pullback_signals(bars, params)
     entries = sig.entries
     if mask_before > 0:
@@ -105,9 +109,16 @@ def _optimise(train: pd.DataFrame) -> dict[str, float]:
 
 
 def main() -> None:
+    global _USE_4H
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--h4", action="store_true", help="require 4h structure confirmation (§4)")
+    args = parser.parse_args()
+    _USE_4H = args.h4
+
     bars = _load_bars()
     n = len(bars)
     print(f"loaded {n:,} bars  {bars['open_time'].iloc[0]} → {bars['open_time'].iloc[-1]}")
+    print(f"4h confirmation: {'ON' if _USE_4H else 'off'}")
 
     oos_equity_parts: list[pd.Series] = []
     all_trades = []

@@ -169,3 +169,14 @@ class TestTrendPullbackSignals:
         # First day's bars can't know a 200-day SMA → no trend, no entries.
         assert not sig.trend_active.iloc[:24].any()
         assert not sig.entries.iloc[:24].any()
+
+    def test_4h_confirmation_only_narrows_entries(self) -> None:
+        # Adding the 4h filter can only remove entries, never add them.
+        n = 6000
+        prices = [100.0 + np.sin(i / 30) * 8 + i * 0.01 for i in range(n)]
+        bars = _bars(prices, [p + 1 for p in prices], [p - 1 for p in prices])
+        base = compute_trend_pullback_signals(bars, TrendPullbackParams())
+        h4 = compute_trend_pullback_signals(bars, TrendPullbackParams(use_4h_confirmation=True))
+        assert h4.entries.sum() <= base.entries.sum()
+        # Every 4h-confirmed entry must also be a base entry (subset).
+        assert (h4.entries & ~base.entries).sum() == 0

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from trading_bot.strategies.indicators import atr, rsi, sma
+from trading_bot.strategies.indicators import atr, ema, rsi, sma
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,10 @@ class TrendPullbackParams:
     daily_sma_slow: int = 200  # daily SMA200 (macro trend)
     vol_window: int = 20
     vol_ratio_min: float = 0.5  # skip entries on abnormally low volume
+    # Multi-timeframe confirmation (STRATEGY_ROADMAP.md §4): require the last
+    # CLOSED 4h bar to be above its EMA, to cut counter-structure pullbacks.
+    use_4h_confirmation: bool = False
+    h4_ema_period: int = 50
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,15 @@ def compute_trend_pullback_signals(
         & vol_ok.fillna(False)
         & pd.Series(trend_up_1h, index=close.index)
     )
+
+    # ── Optional 4h structure confirmation (§4) ───────────────────────────────
+    if p.use_4h_confirmation:
+        h4_close = pd.Series(close.to_numpy(), index=ot_index).resample("4h").last()
+        h4_ema = ema(h4_close, p.h4_ema_period)
+        # Last CLOSED 4h bar only (shift 1) → no look-ahead onto the 1h timeline.
+        h4_up = (h4_close > h4_ema).shift(1)
+        h4_up_1h = h4_up.reindex(ot_index, method="ffill").fillna(False).to_numpy(dtype=bool)
+        entries = entries & pd.Series(h4_up_1h, index=close.index)
 
     return TrendPullbackSignals(
         entries=pd.Series(entries.to_numpy(dtype=bool), index=idx),

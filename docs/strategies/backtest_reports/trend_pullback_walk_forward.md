@@ -72,13 +72,21 @@ full stop-outs plus per-trade costs, expectancy goes negative.
    **refutes** the "trailing stop is killing the edge" hypothesis: the problem is
    the **entry**, not the exit. The RSI-recovery pullback simply does not produce
    enough winners in this data, regardless of exit management.
-2. **Multi-timeframe entry confirmation** (§4) — a 4h structure filter to cut
-   false pullback signals. *Not yet run.* This targets the entry, which is where
-   the failure actually is.
+2. **4h multi-timeframe confirmation** (§4) — **TESTED, helps but no edge.**
+   Requiring the last-closed 4h bar above its EMA(50) before entry (run with
+   `--h4`) improved every risk metric — **−5.9% return, Sharpe −0.66, max DD
+   −8.2%**, 29 trades (vs −11.8% / −0.97 / −15.1%, 47 trades base). The filter
+   removes bad trades (roughly halving both the loss and the drawdown) but the
+   survivors still don't have positive expectancy — it converges toward
+   break-even by trading *less*, not by finding winners. Still negative.
 3. **Regime-segmented evaluation** (§2.3) — the aggregate hides regime-specific
    behaviour; measure per-regime expectancy. *Not yet run.*
 
-Both exit variants (trailing and full-target) lose out-of-sample, so the entry
-signal has no demonstrated edge on BTC 2023–2026. Until a variant clears
-buy-and-hold on a **risk-adjusted** basis out-of-sample, Trend Pullback stays
-research-only. `trend_pullback_enabled = false`.
+Every variant tested — base, no-trailing, and 4h-confirmed — loses out-of-sample.
+Each added filter (structure, timeframe) improves the risk profile but converges
+to break-even-minus-costs, never to positive expectancy. The RSI-recovery
+pullback entry has **no demonstrated edge on BTC 2023–2026**. Until a variant
+clears buy-and-hold on a **risk-adjusted** basis out-of-sample, Trend Pullback
+stays research-only. `trend_pullback_enabled = false`.
+
+Reproduce: `uv run python scripts/research_trend_pullback.py [--h4]`
