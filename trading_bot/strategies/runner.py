@@ -23,6 +23,7 @@ from trading_bot.observability.logging import get_logger
 from trading_bot.promotion.pipeline import PromotionTier, register_strategy
 from trading_bot.strategies.base import StrategyResult
 from trading_bot.strategies.rsi_mean_reversion import RsiMeanReversionStrategy
+from trading_bot.strategies.sentiment import SentimentTrendHybridStrategy
 from trading_bot.strategies.sma_crossover import SmaCrossoverStrategy
 
 log = get_logger(__name__)
@@ -30,6 +31,10 @@ log = get_logger(__name__)
 _STRATEGIES = [
     SmaCrossoverStrategy(fast=20, slow=50),
     RsiMeanReversionStrategy(period=14, oversold=30.0, overbought=70.0),
+    # First strategy with a demonstrated risk-adjusted edge on BTC
+    # (docs/strategies/backtest_reports/sentiment/). Paper-only: needs the live
+    # funding_rate / fear_greed columns injected below; returns HOLD without them.
+    SentimentTrendHybridStrategy(funding_below=0.0, exit_ma=100),
 ]
 _freshness_monitor = DataQualityMonitor()
 
@@ -43,6 +48,7 @@ _last_computed_at: datetime | None = None
 _STRATEGY_FLAGS = {
     "sma_crossover": "strategy_sma_enabled",
     "rsi_mean_reversion": "strategy_rsi_enabled",
+    "sentiment_trend_hybrid": "strategy_sentiment_hybrid_enabled",
 }
 
 
@@ -141,6 +147,11 @@ async def refresh_signals() -> list[StrategyResult]:
             _send_stale_data_alert(symbol, str(e))
             continue
 
+        # Inject live non-price signals so sentiment strategies can read them.
+        # Price-only strategies ignore the extra columns. Without a value the
+        # sentiment strategy fails safe (returns HOLD).
+        bars_ctx = _inject_context_columns(bars, ctx)
+
         for strategy in _STRATEGIES:
             flag_name = _STRATEGY_FLAGS.get(strategy.strategy_id)
             if flag_name and not await is_enabled(flag_name):
@@ -158,7 +169,7 @@ async def refresh_signals() -> list[StrategyResult]:
                 )
                 continue
             try:
-                result = strategy.compute(bars)
+                result = strategy.compute(bars_ctx)
                 result = result.model_copy(update={"symbol": symbol})
                 all_results.append(result)
                 log.info(
@@ -200,6 +211,27 @@ async def refresh_signals() -> list[StrategyResult]:
         log.error("paper_routing_error", error=str(e))
 
     return all_results
+
+
+def _inject_context_columns(bars: pd.DataFrame, ctx: MarketContext | None) -> pd.DataFrame:
+    """Return bars with live ``funding_rate`` / ``fear_greed`` columns attached.
+
+    The sentiment strategy evaluates only the latest bar in ``compute()``, so the
+    current context value is broadcast across the frame — the moving-average uses
+    the real close history, only the entry gate reads the last funding/F&G value.
+    Returns ``bars`` unchanged when no context is available (fail-safe: the
+    sentiment strategy then returns HOLD).
+    """
+    if ctx is None:
+        return bars
+    if ctx.funding_rate is None and ctx.fear_greed_value is None:
+        return bars
+    enriched = bars.copy()
+    if ctx.funding_rate is not None:
+        enriched["funding_rate"] = float(ctx.funding_rate)
+    if ctx.fear_greed_value is not None:
+        enriched["fear_greed"] = float(ctx.fear_greed_value)
+    return enriched
 
 
 def _apply_context(results: list[StrategyResult], ctx: MarketContext) -> list[StrategyResult]:

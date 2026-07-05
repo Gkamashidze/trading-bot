@@ -60,6 +60,12 @@ flags:
     owner: "quant"
     critical: false
 
+  strategy_sentiment_hybrid_enabled:
+    default: true
+    description: "Enables sentiment_trend_hybrid (funding contrarian entry + trend exit) — PAPER only, first strategy with a validated risk-adjusted edge on BTC"
+    owner: "quant"
+    critical: false
+
   # ── Research safety ───────────────────────────────────────────────────────
   canary_trade_enabled:
     default: false

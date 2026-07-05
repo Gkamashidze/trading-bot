@@ -170,3 +170,47 @@ class TestRefreshSignalsStaleData:
         assert results == []
         mock_strategy.compute.assert_not_called()
         route_mock.assert_called_once_with([])
+
+
+class TestContextInjection:
+    def test_injects_funding_and_fear_greed_columns(self) -> None:
+        from trading_bot.market_context import MarketContext
+        from trading_bot.strategies.runner import _inject_context_columns
+
+        bars = _make_bars()
+        ctx = MarketContext(
+            fear_greed_value=18,
+            fear_greed_label="Extreme Fear",
+            funding_rate=-0.0004,
+            fed_funds_rate=None,
+            cpi_yoy=None,
+            fetched_at=datetime.now(UTC),
+        )
+        out = _inject_context_columns(bars, ctx)
+        assert out["funding_rate"].iloc[-1] == -0.0004
+        assert out["fear_greed"].iloc[-1] == 18.0
+        # Original frame is not mutated.
+        assert "funding_rate" not in bars.columns
+
+    def test_none_context_returns_bars_unchanged(self) -> None:
+        from trading_bot.strategies.runner import _inject_context_columns
+
+        bars = _make_bars()
+        assert _inject_context_columns(bars, None) is bars
+
+    def test_hybrid_holds_without_context(self) -> None:
+        # No funding/fear columns → the sentiment strategy must fail safe (HOLD).
+        from trading_bot.strategies.sentiment import SentimentTrendHybridStrategy
+
+        bars = pd.DataFrame(
+            {
+                "open_time": pd.date_range("2024-01-01", periods=120, freq="1D", tz="UTC"),
+                "open": [100.0] * 120,
+                "high": [101.0] * 120,
+                "low": [99.0] * 120,
+                "close": [100.0 + i for i in range(120)],
+                "volume": [10.0] * 120,
+            }
+        )
+        result = SentimentTrendHybridStrategy(exit_ma=100).compute(bars)
+        assert result.signal == "HOLD"

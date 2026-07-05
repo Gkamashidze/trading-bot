@@ -37,6 +37,7 @@ assets:
     enabled_strategies:
       - "sma_crossover"
       - "rsi_mean_reversion"
+      - "sentiment_trend_hybrid"
     feature_flag: "asset_group_crypto_phase1_enabled"
     rationale: >
       Deepest, most liquid crypto market. Reference asset for the entire
