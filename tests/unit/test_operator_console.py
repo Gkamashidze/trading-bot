@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from trading_bot.operator_console.telegram_commands import TelegramCommandHandler
+from trading_bot.operator_console.telegram_commands import (
+    _MANAGEABLE_STRATEGIES,
+    TelegramCommandHandler,
+    _main_menu_kb,
+    _manage_menu_kb,
+    _strategy_menu_kb,
+)
 
 
 def _make_handler(authorized_chat_id: int = 123456) -> TelegramCommandHandler:
@@ -224,3 +230,136 @@ class TestPollFiltering:
 
         await handler._poll_once(client)
         assert handler._offset == 43  # update_id + 1
+
+
+def _all_callback_data(kb: dict) -> list[str]:
+    return [btn["callback_data"] for row in kb["inline_keyboard"] for btn in row]
+
+
+class TestMenuKeyboards:
+    def test_main_menu_has_expected_actions(self) -> None:
+        data = _all_callback_data(_main_menu_kb())
+        assert "do:status" in data
+        assert "do:portfolio" in data
+        assert "do:reconcile" in data
+        assert "nav:manage" in data  # entry to the management submenu
+
+    def test_manage_menu_has_controls_and_back(self) -> None:
+        data = _all_callback_data(_manage_menu_kb())
+        assert "do:kill" in data
+        assert "do:cancel_all" in data
+        assert "nav:pause" in data
+        assert "nav:resume" in data
+        assert "nav:reduce_risk" in data
+        assert "nav:main" in data  # back button
+
+    def test_strategy_menu_lists_every_manageable_strategy(self) -> None:
+        kb = _strategy_menu_kb("pause")
+        data = _all_callback_data(kb)
+        for sid in _MANAGEABLE_STRATEGIES:
+            assert f"do:pause:{sid}" in data
+        assert "nav:manage" in data  # back button
+
+    def test_all_callback_data_within_telegram_64_byte_limit(self) -> None:
+        keyboards = [
+            _main_menu_kb(),
+            _manage_menu_kb(),
+            _strategy_menu_kb("pause"),
+            _strategy_menu_kb("resume"),
+            _strategy_menu_kb("reduce_risk"),
+        ]
+        for kb in keyboards:
+            for cb in _all_callback_data(kb):
+                assert len(cb.encode()) <= 64, cb
+
+
+class TestCallbackHandling:
+    @pytest.mark.asyncio
+    async def test_cmd_menu_sends_keyboard(self) -> None:
+        handler = _make_handler()
+        handler._send_with_kb = AsyncMock()
+        await handler._cmd_menu(AsyncMock(), 123456)
+        handler._send_with_kb.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_do_callback_dispatches_command(self) -> None:
+        handler = _make_handler()
+        handler._dispatch = AsyncMock()
+        handler._answer_callback = AsyncMock()
+        callback = {
+            "id": "cb1",
+            "message": {"chat": {"id": 123456}, "message_id": 7},
+            "data": "do:status",
+        }
+        await handler._handle_callback(AsyncMock(), callback)
+        handler._answer_callback.assert_awaited_once()
+        args = handler._dispatch.call_args[0]
+        assert args[1] == 123456
+        assert args[2] == "status"
+        assert args[3] == []
+
+    @pytest.mark.asyncio
+    async def test_do_callback_with_arg_passes_strategy_id(self) -> None:
+        handler = _make_handler()
+        handler._dispatch = AsyncMock()
+        handler._answer_callback = AsyncMock()
+        callback = {
+            "id": "cb2",
+            "message": {"chat": {"id": 123456}, "message_id": 7},
+            "data": "do:pause:sma_crossover",
+        }
+        await handler._handle_callback(AsyncMock(), callback)
+        args = handler._dispatch.call_args[0]
+        assert args[2] == "pause"
+        assert args[3] == ["sma_crossover"]
+
+    @pytest.mark.asyncio
+    async def test_nav_callback_edits_menu(self) -> None:
+        handler = _make_handler()
+        handler._edit_with_kb = AsyncMock()
+        handler._answer_callback = AsyncMock()
+        callback = {
+            "id": "cb3",
+            "message": {"chat": {"id": 123456}, "message_id": 7},
+            "data": "nav:manage",
+        }
+        await handler._handle_callback(AsyncMock(), callback)
+        handler._edit_with_kb.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_callback_is_ignored(self) -> None:
+        handler = _make_handler()
+        handler._dispatch = AsyncMock()
+        handler._edit_with_kb = AsyncMock()
+        handler._answer_callback = AsyncMock()
+        callback = {
+            "id": "cb4",
+            "message": {"chat": {"id": 999}, "message_id": 7},  # wrong chat
+            "data": "do:kill",
+        }
+        await handler._handle_callback(AsyncMock(), callback)
+        handler._dispatch.assert_not_awaited()
+        handler._edit_with_kb.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_poll_routes_callback_query(self) -> None:
+        handler = _make_handler()
+        handler._handle_callback = AsyncMock()
+        update = {
+            "update_id": 55,
+            "callback_query": {
+                "id": "cb5",
+                "message": {"chat": {"id": 123456}, "message_id": 7},
+                "data": "do:status",
+            },
+        }
+        client = AsyncMock()
+        client.get = AsyncMock(
+            return_value=MagicMock(
+                status_code=200,
+                json=lambda: {"ok": True, "result": [update]},
+            )
+        )
+        await handler._poll_once(client)
+        handler._handle_callback.assert_awaited_once()
+        assert handler._offset == 56

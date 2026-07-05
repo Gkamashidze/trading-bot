@@ -59,6 +59,18 @@ _STATE_CHANGING_COMMANDS = frozenset(
 _command_dedup: dict[str, float] = {}
 _COMMAND_DEDUP_WINDOW_S = 60.0
 
+# Live strategies an operator can pause/resume/reduce-risk from the button menu.
+# Research candidates (trend_filter, donchian_breakout, macd) are intentionally
+# excluded — they are not wired into the runner.
+_MANAGEABLE_STRATEGIES = ("sma_crossover", "rsi_mean_reversion")
+
+# Human labels for the per-strategy action submenus.
+_ACTION_LABELS = {
+    "pause": "⏸ პაუზა",
+    "resume": "▶️ გაშვება",
+    "reduce_risk": "⚠️ Reduce Risk",
+}
+
 
 def _make_operator_idempotency_key(command: str, args: list[str], chat_id: int) -> str:
     """Deterministic idempotency key for an operator command (60s window)."""
@@ -66,6 +78,50 @@ def _make_operator_idempotency_key(command: str, args: list[str], chat_id: int) 
     window = int(time.time() / _COMMAND_DEDUP_WINDOW_S)
     raw = f"{chat_id}:{command}:{':'.join(args)}:{window}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+# ── Inline-keyboard builders (pure — no I/O, unit-testable) ──────────────────
+# Callback-data scheme (Telegram caps callback_data at 64 bytes):
+#   nav:<target>          — navigate the menu (main | manage | pause | resume | reduce_risk)
+#   do:<command>          — run a no-arg command (status, kill, cancel_all, …)
+#   do:<command>:<arg>    — run a command with one arg (do:pause:sma_crossover)
+InlineKeyboard = dict[str, list[list[dict[str, str]]]]
+
+
+def _btn(text: str, data: str) -> dict[str, str]:
+    return {"text": text, "callback_data": data}
+
+
+def _main_menu_kb() -> InlineKeyboard:
+    return {
+        "inline_keyboard": [
+            [_btn("📊 სტატუსი", "do:status"), _btn("💼 პორტფელი", "do:portfolio")],
+            [_btn("🔐 Circuit Breaker", "do:cb"), _btn("📈 ექსპოზიცია", "do:exposure")],
+            [_btn("📋 ღია ორდერები", "do:open_orders"), _btn("🔄 რეკონცილიაცია", "do:reconcile")],
+            [_btn("⚙️ მართვა", "nav:manage")],
+        ]
+    }
+
+
+def _manage_menu_kb() -> InlineKeyboard:
+    return {
+        "inline_keyboard": [
+            [_btn("🔴 Kill Switch", "do:kill")],
+            [_btn("⏸ პაუზა", "nav:pause"), _btn("▶️ გაშვება", "nav:resume")],
+            [_btn("⚠️ Reduce Risk", "nav:reduce_risk")],
+            [_btn("❌ Cancel All", "do:cancel_all")],
+            [_btn("⬅️ უკან", "nav:main")],
+        ]
+    }
+
+
+def _strategy_menu_kb(action: str) -> InlineKeyboard:
+    """Strategy picker for a per-strategy action (pause/resume/reduce_risk)."""
+    rows: list[list[dict[str, str]]] = [
+        [_btn(sid, f"do:{action}:{sid}")] for sid in _MANAGEABLE_STRATEGIES
+    ]
+    rows.append([_btn("⬅️ უკან", "nav:manage")])
+    return {"inline_keyboard": rows}
 
 
 class TelegramCommandHandler:
@@ -115,6 +171,8 @@ class TelegramCommandHandler:
     async def _register_commands(self, client: httpx.AsyncClient) -> None:
         """Register bot command menu via setMyCommands (shows on '/' in Telegram)."""
         commands = [
+            # ── მენიუ ─────────────────────────────────────────────────────
+            {"command": "menu", "description": "📋 მენიუ — ღილაკებით მართვა (აკრეფის გარეშე)"},
             # ── ინფორმაცია ────────────────────────────────────────────────
             {"command": "status", "description": "სისტემის სტატუსი — DB, scheduler, uptime"},
             {"command": "portfolio", "description": "პორტფელი — equity, cash, P&L, პოზიციები"},
@@ -154,6 +212,12 @@ class TelegramCommandHandler:
 
         for update in data.get("result", []):
             self._offset = update["update_id"] + 1
+
+            callback = update.get("callback_query")
+            if callback is not None:
+                await self._handle_callback(client, callback)
+                continue
+
             msg = update.get("message")
             if msg is None:
                 continue
@@ -210,6 +274,8 @@ class TelegramCommandHandler:
             return
 
         no_arg_handlers: dict[str, Any] = {
+            "menu": self._cmd_menu,
+            "start": self._cmd_menu,
             "status": self._cmd_status,
             "portfolio": self._cmd_portfolio,
             "cb": self._cmd_circuit_breaker,
@@ -477,6 +543,8 @@ class TelegramCommandHandler:
         lines = [
             "🤖 *ბრძანებები*",
             "",
+            "📋 /menu — ღილაკებით მართვა (აკრეფის გარეშე)",
+            "",
             "*ინფორმაცია:*",
             "/status — სისტემის სტატუსი",
             "/portfolio — პორტფელი",
@@ -494,6 +562,107 @@ class TelegramCommandHandler:
             "/ack <alert\\_id> — alert-ის დასტური",
         ]
         await self._send(client, chat_id, "\n".join(lines))
+
+    # ── Button menu ──────────────────────────────────────────────────────────
+    async def _cmd_menu(self, client: httpx.AsyncClient, chat_id: int) -> None:
+        """Send the main button menu — tap instead of typing commands."""
+        await self._send_with_kb(
+            client, chat_id, "📋 *მთავარი მენიუ*\nაირჩიე მოქმედება 👇", _main_menu_kb()
+        )
+
+    async def _handle_callback(self, client: httpx.AsyncClient, callback: dict[str, Any]) -> None:
+        """Handle an inline-keyboard button tap (callback_query)."""
+        cb_id = callback.get("id", "")
+        message = callback.get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        message_id = message.get("message_id")
+        data = callback.get("data") or ""
+
+        # Always answer to clear the client-side loading spinner.
+        await self._answer_callback(client, cb_id)
+
+        if chat_id != self._authorized_chat_id:
+            log.warning("telegram_unauthorized_callback", chat_id=chat_id)
+            return
+
+        if data.startswith("nav:"):
+            await self._navigate(client, chat_id, message_id, data[len("nav:") :])
+            return
+        if data.startswith("do:"):
+            parts = data[len("do:") :].split(":")
+            await self._dispatch(client, chat_id, parts[0], parts[1:])
+            return
+        log.warning("telegram_unknown_callback_data", data=data[:64])
+
+    async def _navigate(
+        self, client: httpx.AsyncClient, chat_id: int, message_id: int | None, target: str
+    ) -> None:
+        """Edit the menu message in place to show a different keyboard."""
+        if target == "main":
+            text, kb = "📋 *მთავარი მენიუ*\nაირჩიე მოქმედება 👇", _main_menu_kb()
+        elif target == "manage":
+            text, kb = "⚙️ *მართვა*\n⚠️ audited მოქმედებები:", _manage_menu_kb()
+        elif target in _ACTION_LABELS:
+            text = f"{_ACTION_LABELS[target]} — აირჩიე სტრატეგია:"
+            kb = _strategy_menu_kb(target)
+        else:
+            log.warning("telegram_unknown_nav_target", target=target[:32])
+            return
+        await self._edit_with_kb(client, chat_id, message_id, text, kb)
+
+    async def _send_with_kb(
+        self, client: httpx.AsyncClient, chat_id: int, text: str, kb: InlineKeyboard
+    ) -> None:
+        url = _TELEGRAM_API.format(token=self._token, method="sendMessage")
+        try:
+            await client.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "reply_markup": kb,
+                },
+                timeout=10,
+            )
+        except Exception as e:
+            log.warning("telegram_menu_send_failed", error=str(e))
+
+    async def _edit_with_kb(
+        self,
+        client: httpx.AsyncClient,
+        chat_id: int,
+        message_id: int | None,
+        text: str,
+        kb: InlineKeyboard,
+    ) -> None:
+        if message_id is None:
+            await self._send_with_kb(client, chat_id, text, kb)
+            return
+        url = _TELEGRAM_API.format(token=self._token, method="editMessageText")
+        try:
+            await client.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                    "reply_markup": kb,
+                },
+                timeout=10,
+            )
+        except Exception as e:
+            log.warning("telegram_menu_edit_failed", error=str(e))
+
+    async def _answer_callback(self, client: httpx.AsyncClient, cb_id: str) -> None:
+        if not cb_id:
+            return
+        url = _TELEGRAM_API.format(token=self._token, method="answerCallbackQuery")
+        try:
+            await client.post(url, json={"callback_query_id": cb_id}, timeout=10)
+        except Exception as e:
+            log.warning("telegram_answer_callback_failed", error=str(e))
 
     async def _send(self, client: httpx.AsyncClient, chat_id: int, text: str) -> None:
         url = _TELEGRAM_API.format(token=self._token, method="sendMessage")
