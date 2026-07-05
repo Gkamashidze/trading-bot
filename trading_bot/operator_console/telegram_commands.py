@@ -62,7 +62,11 @@ _COMMAND_DEDUP_WINDOW_S = 60.0
 # Live strategies an operator can pause/resume/reduce-risk from the button menu.
 # Research candidates (trend_filter, donchian_breakout, macd) are intentionally
 # excluded — they are not wired into the runner.
-_MANAGEABLE_STRATEGIES = ("sma_crossover", "rsi_mean_reversion")
+_MANAGEABLE_STRATEGIES = (
+    "sma_crossover",
+    "rsi_mean_reversion",
+    "sentiment_trend_hybrid",
+)
 
 # Human labels for the per-strategy action submenus.
 _ACTION_LABELS = {
