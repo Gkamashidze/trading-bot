@@ -42,6 +42,28 @@ actually matters for a leveraged or risk-budgeted allocation, it wins.
   risk-adjusted result: 24% win rate but the winners are large (trend-following
   profile), and the trend exit caps drawdowns at −56%.
 
+## Multi-asset validation (2026-07-05) — real but asset-dependent
+
+One asset, one split is not proof. `scripts/validate_sentiment_hybrid.py` reran
+the hybrid on **BTC and ETH** across **three train/test window sizes**:
+
+| Asset | Split | Strat Sharpe | B&H Sharpe | Max DD (strat vs B&H) | Edge |
+|---|---|---|---|---|---|
+| BTC | 504/126 | 0.89 | 0.77 | −56% vs −77% | Sharpe + DD ✅ |
+| BTC | 365/90 | 1.03 | 0.90 | −50% vs −77% | Sharpe + DD ✅ |
+| BTC | 730/180 | 1.16 | 0.84 | −48% vs −77% | Sharpe + DD ✅ |
+| ETH | 504/126 | 0.75 | 0.73 | −67% vs −79% | Sharpe + DD ✅ |
+| ETH | 365/90 | 0.31 | 0.81 | −79% vs −79% | DD only ⚠️ |
+| ETH | 730/180 | 0.74 | 0.88 | −62% vs −79% | DD only ⚠️ |
+
+**Verdict: real but not universal.** Sharpe beats buy-and-hold in **4 of 6**
+combos. Two robust properties: it beats Sharpe on **BTC across all three splits**,
+and it **reduces max drawdown in all six** combos (both assets, every split).
+But on **ETH the Sharpe edge is marginal-to-absent** — the 365/90 split is a bad
+miss (+29% vs +1030%; short windows whipsawed out of ETH's 2020–21 run). So the
+hybrid is best read as a **drawdown-reducing overlay with a Sharpe edge that is
+strong on BTC and unreliable on ETH** — not yet a universal alpha.
+
 ## Honest caveats
 
 - **Beats on Sharpe + drawdown, not on raw return.** To turn the higher Sharpe
