@@ -64,14 +64,21 @@ target, and only **11% reach the full take-profit**. The trailing stop is
 destroying the edge the bracket was designed to capture. Combined with 57%
 full stop-outs plus per-trade costs, expectancy goes negative.
 
-### Research follow-ups (not yet run)
+### Research follow-ups
 
-1. **Loosen or remove the trailing stop** — let winners run to the full target;
-   measure whether realised R:R recovers toward 2:1.
+1. **Remove the trailing stop — TESTED, did NOT help.** Letting winners run to
+   the full target gave **−15.8% OOS / Sharpe −0.71** (worse on return; win rate
+   fell to 28.6% as more trades hit the full stop, 70% stop-outs). This
+   **refutes** the "trailing stop is killing the edge" hypothesis: the problem is
+   the **entry**, not the exit. The RSI-recovery pullback simply does not produce
+   enough winners in this data, regardless of exit management.
 2. **Multi-timeframe entry confirmation** (§4) — a 4h structure filter to cut
-   false pullback signals.
+   false pullback signals. *Not yet run.* This targets the entry, which is where
+   the failure actually is.
 3. **Regime-segmented evaluation** (§2.3) — the aggregate hides regime-specific
-   behaviour; measure per-regime expectancy.
+   behaviour; measure per-regime expectancy. *Not yet run.*
 
-Until a variant clears buy-and-hold on a **risk-adjusted** basis out-of-sample,
-Trend Pullback stays research-only. `trend_pullback_enabled = false`.
+Both exit variants (trailing and full-target) lose out-of-sample, so the entry
+signal has no demonstrated edge on BTC 2023–2026. Until a variant clears
+buy-and-hold on a **risk-adjusted** basis out-of-sample, Trend Pullback stays
+research-only. `trend_pullback_enabled = false`.
