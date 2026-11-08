@@ -12,8 +12,11 @@ Restore procedure (runbook): see trading_bot/docs/runbooks/disaster-recovery.md
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from trading_bot.observability.logging import get_logger
@@ -38,6 +41,11 @@ class StateSnapshot:
     cb_peak_tier: int
     cb_tripped_at: str | None
     manager_type: str  # "paper" or future "live"
+    exact_total_equity: str | None = None
+    exact_cash_balance: str | None = None
+    equity_at_day_start: str | None = None
+    daily_equity_peak: str | None = None
+    risk_day: str | None = None
 
 
 def capture_snapshot() -> StateSnapshot:
@@ -49,12 +57,12 @@ def capture_snapshot() -> StateSnapshot:
     cb = get_circuit_breaker()
     snap = portfolio.get_snapshot()
 
-    positions = [
+    positions: list[dict[str, object]] = [
         {
             "symbol": p.symbol,
-            "qty": float(p.quantity),
-            "avg_cost": float(p.average_cost),
-            "current_price": float(p.current_price),
+            "qty": str(p.quantity),
+            "avg_cost": str(p.average_cost),
+            "current_price": str(p.current_price),
             "opened_at": p.opened_at.isoformat() if p.opened_at else None,
             "strategy_id": p.strategy_id or "",
         }
@@ -73,6 +81,11 @@ def capture_snapshot() -> StateSnapshot:
         cb_peak_tier=cb.peak_tier_today,
         cb_tripped_at=cb.tripped_at.isoformat() if cb.tripped_at else None,
         manager_type="paper",
+        exact_total_equity=str(snap.total_equity),
+        exact_cash_balance=str(snap.cash_balance),
+        equity_at_day_start=str(portfolio._equity_at_day_start),
+        daily_equity_peak=str(portfolio._daily_equity_peak),
+        risk_day=portfolio._risk_day.isoformat(),
     )
 
 
@@ -84,7 +97,16 @@ def save_snapshot(
     directory.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     path = directory / f"{_FILENAME_PREFIX}{ts}.json"
-    path.write_text(json.dumps(asdict(snapshot), indent=2))
+    with tempfile.NamedTemporaryFile(mode="w", dir=directory, suffix=".tmp", delete=False) as file:
+        temporary = Path(file.name)
+        try:
+            json.dump(asdict(snapshot), file, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+    os.replace(temporary, path)
     log.info(
         "snapshot_saved",
         path=str(path),
@@ -107,15 +129,39 @@ def restore_latest_snapshot(
         log.info("no_snapshots_found", directory=str(directory))
         return None
 
-    latest = files[0]
-    try:
-        data = json.loads(latest.read_text())
-        snap = StateSnapshot(**data)
-        log.info("snapshot_restored", path=str(latest), captured_at=snap.captured_at)
-        return snap
-    except Exception as e:
-        log.error("snapshot_restore_failed", path=str(latest), error=str(e))
-        return None
+    for latest in files:
+        try:
+            data = json.loads(latest.read_text())
+            snap = StateSnapshot(**data)
+            captured = datetime.fromisoformat(snap.captured_at)
+            if captured.tzinfo is None or captured.utcoffset() is None:
+                raise ValueError("snapshot timestamps must be UTC-aware")
+            monetary: list[object] = [
+                snap.total_equity,
+                snap.cash_balance,
+                snap.daily_pnl,
+                snap.daily_drawdown_pct,
+            ]
+            monetary.extend(
+                value
+                for value in (
+                    snap.exact_total_equity,
+                    snap.exact_cash_balance,
+                    snap.equity_at_day_start,
+                    snap.daily_equity_peak,
+                )
+                if value is not None
+            )
+            monetary.extend(
+                pos[key] for pos in snap.positions for key in ("qty", "avg_cost", "current_price")
+            )
+            if not all(Decimal(str(value)).is_finite() for value in monetary):
+                raise ValueError("snapshot monetary values must be finite")
+            log.info("snapshot_restored", path=str(latest), captured_at=snap.captured_at)
+            return snap
+        except Exception as exc:
+            log.error("snapshot_restore_failed", path=str(latest), error=str(exc))
+    return None
 
 
 def prune_old_snapshots(

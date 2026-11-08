@@ -15,6 +15,7 @@ Signal-change tracking prevents buying repeatedly while already positioned.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import UTC, datetime
@@ -44,6 +45,7 @@ _MIN_ORDER_VALUE = Decimal("10")  # skip orders worth less than $10
 
 _risk = RiskEngine()
 _exchange = PaperExchange()
+_ROUTE_LOCK = asyncio.Lock()
 
 # Persist last signal state across restarts — Railway mounts a volume at /data.
 # Derived from DATA_PATH env var so dev and prod use the same code path.
@@ -112,6 +114,12 @@ def _record_reconciliation_rejection(
 
 
 async def route_signal(result: StrategyResult) -> None:
+    """Serialize portfolio/risk/order mutations across concurrent refreshes."""
+    async with _ROUTE_LOCK:
+        await _route_signal_locked(result)
+
+
+async def _route_signal_locked(result: StrategyResult) -> None:
     """Route a single StrategyResult to the paper exchange.
 
     Only acts on BUY/SELL signals, and only when the signal changed from

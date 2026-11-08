@@ -6,6 +6,8 @@ Module-level singleton via get_price_cache() — safe to call from anywhere
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from trading_bot.core.models import PriceTick
 
 _cache: PriceCache | None = None
@@ -18,7 +20,17 @@ class PriceCache:
         self._ticks: dict[str, PriceTick] = {}
 
     async def update(self, tick: PriceTick) -> None:
+        if not tick.price.is_finite() or tick.price <= 0:
+            return
+        previous = self._ticks.get(tick.symbol)
+        if previous is not None and tick.timestamp < previous.timestamp:
+            return
         self._ticks[tick.symbol] = tick
+        age = (datetime.now(UTC) - tick.timestamp).total_seconds()
+        if -5 <= age <= 30:
+            from trading_bot.portfolio.manager import get_portfolio_manager
+
+            get_portfolio_manager().update_prices({tick.symbol: tick.price})
 
     def get(self, symbol: str) -> PriceTick | None:
         return self._ticks.get(symbol)
