@@ -2,7 +2,12 @@
 
 Professional-grade automated trading system — Python 3.12, institutional-grade engineering.
 
-**Current Stage: 0 — Infrastructure & Engineering Standards**
+**Current operation: paper trading and production-readiness validation.**
+
+The main infrastructure, market-data, strategy, backtesting, execution and safety
+modules are implemented. This does not certify live trading. Real-money execution
+remains disabled until the evidence, permission, reconciliation and human review
+requirements pass. Status reviewed: 2026-11-08.
 
 ---
 
@@ -14,7 +19,7 @@ Professional-grade automated trading system — Python 3.12, institutional-grade
 - Safety > aggressiveness, reliability > complexity
 - All timestamps UTC, all operations idempotent
 
-Full specification: [`trading_bot/docs/PLAN.md`](trading_bot/docs/PLAN.md) (v5)
+Full specification: [`docs/PLAN.md`](docs/PLAN.md) (v5)
 
 ---
 
@@ -93,21 +98,34 @@ uv run pre-commit install --hook-type commit-msg
 
 ## Safety
 
-`live_trading_enabled = false` — ALWAYS false in Stage 0. All exchange operations are read-only.
-`place_order()` raises `NotImplementedError` until Stage 5.
+`live_trading_enabled=false` and the global micro-live code gate remain disabled.
+The automated crypto runner uses `PaperExchange`. The explicit micro-live operator
+path requires its own readiness, risk and idempotency checks; do not use real
+orders as tests or bypass promotion requirements.
 
----
+Production dashboard access requires a separate, randomly generated
+`DASHBOARD_API_KEY` of at least 32 characters. Browser username: `operator`;
+password: the variable's value. API clients use `X-API-Key`, never query strings.
+Health probes remain public. An unset production key fails closed.
 
-## Roadmap
+- [Readiness report](trading_bot/go_live/criteria.py): at least 30 observed paper
+  days and 100 completed round trips, verified parity and audit history, fresh
+  clean reconciliation, documented exchange permissions and current human approval.
+- [Rollback procedure](trading_bot/docs/runbooks/deployment-rollback.md)
+- [Credential exposure procedure](trading_bot/docs/runbooks/credential-exposure.md)
+- [Readiness architecture decision](trading_bot/docs/adr/ADR-0010-readiness-evidence-and-audit-integrity.md)
 
-| Stage | Status | Description |
-|-------|--------|-------------|
-| 0 | ✅ In Progress | Infrastructure & Engineering Standards |
-| 1 | ⏳ Next | Data Engineering & Historical OHLCV |
-| 2 | ⏳ Planned | Real-Time WebSocket Infrastructure |
-| 3 | ⏳ Planned | Strategy Engine |
-| 4 | ⏳ Planned | Backtesting Framework |
-| 5 | ⏳ Planned | Execution Engine & Paper Trading |
-| 6 | ⏳ Planned | Safety Layer & Production Controls |
-| 7 | ⏳ Planned | Deployment & Infrastructure |
-| 8 | ⏳ Future | Quant & AI Expansion |
+Legacy fill-price Sharpe estimates cannot approve a strategy. Marked equity
+capture starts with the new recorder; older history is retained, and missing
+historical marks are not fabricated. Strategy and system readiness are separate.
+
+## Deployment and verification
+
+Work on a development branch, run the full pre-commit checks, and open a PR into
+protected `main`. Merge only after required checks pass and the user authorizes
+release. Railway deploys `main` automatically and runs additive migrations first.
+Never bypass branch protection or activate real trading as part of deployment.
+
+CI blocks on dependency vulnerabilities, source security findings and newly
+detected credentials. It also verifies migrations twice, database transaction
+rollback and concurrent audit chain writes on disposable PostgreSQL.

@@ -540,7 +540,7 @@ class TestFinalReportRecommendation:
         ):
             report = await reporter.generate_final_report(uuid.uuid4(), min_days=30, min_trades=20)
 
-        assert report.recommendation == MicroLiveRecommendation.FIX_ISSUES
+        assert report.recommendation == MicroLiveRecommendation.CONTINUE_PAPER
 
     @pytest.mark.asyncio
     async def test_recommendation_eligible_when_all_pass(self) -> None:
@@ -550,19 +550,27 @@ class TestFinalReportRecommendation:
 
         daily = self._make_daily_rows(30, trade_count=2)  # 30 days x 2 = 60 trades
         with (
+            patch.object(reporter, "_verified_strategy_evidence", AsyncMock(return_value=True)),
             patch.object(
                 store,
                 "get_session_report",
                 AsyncMock(
                     return_value={
-                        "trade_count": 60,
+                        "trade_count": 240,
+                        "round_trip_count": 120,
                         "reconciliation_critical_count": 0,
                         "incident_count": 0,
                     }
                 ),
             ),
             patch.object(store, "list_daily_summaries", AsyncMock(return_value=daily)),
-            patch.object(store, "list_weekly_summaries", AsyncMock(return_value=[])),
+            patch.object(
+                store,
+                "list_weekly_summaries",
+                AsyncMock(
+                    return_value=[{"parity_score": Decimal("0.9"), "pnl_pct": Decimal("1.0")}]
+                ),
+            ),
             patch.object(
                 reporter,
                 "_fetch_tca_averages",
@@ -581,7 +589,7 @@ class TestFinalReportRecommendation:
 
         assert report.recommendation == MicroLiveRecommendation.ELIGIBLE_FOR_REVIEW
         assert report.days_observed == 30
-        assert report.trade_count == 60
+        assert report.trade_count == 120
 
     @pytest.mark.asyncio
     async def test_recommendation_reject_when_critical_reconciliation(self) -> None:

@@ -101,6 +101,12 @@ class TestGating:
         )
 
         with (
+            patch.object(executor, "_check_system_readiness", AsyncMock()),
+            patch(
+                "trading_bot.risk.engine.RiskEngine.pre_trade_check",
+                return_value=MagicMock(approved=True),
+            ),
+            patch("trading_bot.idempotency.decorator._default_store", AsyncMock()),
             patch("trading_bot.feature_flags.is_enabled", AsyncMock(return_value=True)),
             patch("trading_bot.portfolio.manager.get_portfolio_manager", return_value=portfolio),
             patch("trading_bot.oms.tracker.get_order_tracker", return_value=MagicMock()),
@@ -108,7 +114,11 @@ class TestGating:
             patch("trading_bot.evidence.recorder.record_fill_evidence", AsyncMock()) as rec_ev,
         ):
             fill = await executor.submit(
-                symbol="BTC/USDT", side="BUY", usd_notional=10, operator="alice"
+                symbol="BTC/USDT",
+                side="BUY",
+                usd_notional=10,
+                operator="alice",
+                idempotency_key="test-request-1",
             )
 
         ex.place_order.assert_awaited_once()

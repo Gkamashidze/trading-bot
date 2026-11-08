@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -65,6 +65,12 @@ class ApprovalEvent(BaseModel):
     rollback_plan_confirmed: bool = False
     risk_sign_off_by: str = ""
 
+    @property
+    def is_current(self) -> bool:
+        if self.approved_at.tzinfo is None or self.approved_at.utcoffset() is None:
+            return False
+        return 0 <= (datetime.now(UTC) - self.approved_at).total_seconds() <= 86400
+
 
 # ---------------------------------------------------------------------------
 # ReadinessChecklist definition
@@ -83,6 +89,11 @@ class GoLiveCriterion(BaseModel):
 
 
 STANDARD_CRITERIA: list[GoLiveCriterion] = [
+    GoLiveCriterion(
+        criterion_id="audit_chain_integrity",
+        label="Audit chain integrity",
+        description="The complete persisted audit chain must verify without tampering or forks.",
+    ),
     GoLiveCriterion(
         criterion_id="dry_run_completed",
         label="Dry-run completed",
@@ -180,21 +191,25 @@ class ReadinessReport(BaseModel):
     results: list[CriterionResult]
     operator_approval: ApprovalEvent | None = None
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def ready(self) -> bool:
         """True only if ALL blocking criteria passed and operator approved."""
-        blocking_failures = [
-            r for r in self.results if r.blocking and r.status == CriterionStatus.FAIL
-        ]
+        expected = {c.criterion_id for c in STANDARD_CRITERIA if c.blocking}
+        passed = {r.criterion_id for r in self.results if r.status == CriterionStatus.PASS}
         return (
-            len(blocking_failures) == 0
+            expected <= passed
+            and not self.failed_blocking
             and self.operator_approval is not None
             and self.operator_approval.approved
+            and self.operator_approval.is_current
+            and self.operator_approval.rollback_plan_confirmed
+            and bool(self.operator_approval.risk_sign_off_by.strip())
         )
 
     @property
     def failed_blocking(self) -> list[CriterionResult]:
-        return [r for r in self.results if r.blocking and r.status == CriterionStatus.FAIL]
+        return [r for r in self.results if r.blocking and r.status != CriterionStatus.PASS]
 
     @property
     def warnings(self) -> list[CriterionResult]:

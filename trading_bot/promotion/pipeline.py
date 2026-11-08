@@ -88,6 +88,11 @@ class StrategyMetrics:
     max_drawdown_pct: float
     win_rate: float
     total_trades: int
+    evidence_errors: list[str] = field(default_factory=list)
+
+    @property
+    def evidence_complete(self) -> bool:
+        return not self.evidence_errors
 
 
 @dataclass
@@ -109,7 +114,16 @@ class StrategyPromotion:
             return False, ["already at LIVE tier"]
 
         gate = PROMOTION_GATES[self.current_tier]
-        failures: list[str] = []
+        import math
+
+        failures: list[str] = list(metrics.evidence_errors)
+        if not all(
+            math.isfinite(v)
+            for v in (metrics.sharpe_ratio, metrics.max_drawdown_pct, metrics.win_rate)
+        ):
+            return False, ["non-finite performance metrics"]
+        if not 0 <= metrics.win_rate <= 1 or not 0 <= metrics.max_drawdown_pct <= 1:
+            return False, ["performance metrics must use fractions in [0, 1]"]
 
         if metrics.days_running < gate.min_days:
             failures.append(f"days {metrics.days_running} < {gate.min_days} required")
@@ -180,81 +194,99 @@ def get_all_promotions() -> list[StrategyPromotion]:
 
 
 async def collect_strategy_metrics(strategy_id: str, pool: object) -> StrategyMetrics | None:
-    """Query paper_orders table and compute point-in-time metrics for a strategy.
+    """Use actual net exits and recorded marked equity, never fill-price changes.
 
-    Returns None if insufficient data exists (< 5 trades).
+    Only observations since marked strategy evidence began count toward promotion.
+    Older fills remain in the immutable evidence store, but cannot stand in for
+    missing historical equity marks. Rejected submissions are not trades.
     """
+    import json
     import math
+    import statistics
     from typing import Any
 
+    from trading_bot.evidence import get_current_session_id
+    from trading_bot.evidence.performance import STRATEGY_EQUITY_KEY
+
+    session_id = get_current_session_id()
+    if session_id is None:
+        return None
     try:
         async with pool.acquire() as conn:  # type: ignore[attr-defined]
-            rows = await conn.fetch(
-                """
-                SELECT side, fill_price, requested_qty,
-                       created_at, status
-                FROM paper_orders
-                WHERE strategy_id = $1
-                  AND status IN ('filled', 'rejected')
-                ORDER BY created_at ASC
-                """,
+            trades = await conn.fetch(
+                """SELECT a.realized_pnl, a.captured_at
+                   FROM evidence_accounting_records a
+                   JOIN evidence_tca_records t
+                     ON a.session_id = t.session_id AND a.order_id = t.order_id
+                   WHERE a.session_id = $1 AND t.strategy_id = $2
+                     AND a.side = 'sell' AND a.realized_pnl IS NOT NULL
+                   ORDER BY a.captured_at""",
+                session_id,
                 strategy_id,
+            )
+            snapshots = await conn.fetch(
+                """SELECT captured_at, positions FROM evidence_portfolio_snapshots
+                   WHERE session_id = $1 ORDER BY captured_at, snapshot_id""",
+                session_id,
             )
     except Exception:
         return None
 
-    if not rows:
-        return None
+    errors: list[str] = []
+    marks: list[tuple[datetime, float]] = []
+    daily: dict[Any, float] = {}
+    initial = 0.0
+    for row in snapshots:
+        positions = row["positions"]
+        if isinstance(positions, str):
+            positions = json.loads(positions)
+        book = positions.get(STRATEGY_EQUITY_KEY, {}).get(strategy_id)
+        if book is None:
+            continue
+        if not book.get("complete"):
+            errors.extend(book.get("errors") or ["incomplete marked equity"])
+            continue
+        equity, capital = float(book["equity"]), float(book["initial_capital"])
+        if not all(math.isfinite(v) and v > 0 for v in (equity, capital)):
+            errors.append("invalid marked equity")
+            continue
+        if initial and capital != initial:
+            errors.append("strategy capital changed within evidence period")
+        initial = capital
+        at = row["captured_at"]
+        if marks and (at - marks[-1][0]).total_seconds() > 25 * 3600:
+            errors.append("gap in marked equity evidence exceeds 25 hours")
+        marks.append((at, equity))
+        if at.date() < datetime.now(UTC).date():
+            daily[at.date()] = equity
 
-    filled = [r for r in rows if r["status"] == "filled"]
-    total_trades = len(rows)
-    if total_trades < 5:
-        return None
-
-    # days_running — elapsed since first order
-    first_at: Any = rows[0]["created_at"]
-    days_running = max(1, (datetime.now(UTC) - first_at).days)
-
-    # win_rate — buy followed by sell at higher price (simplified: compare fill prices)
-    wins = 0
-    buys: list[tuple[float, float]] = []  # (price, qty)
-    for row in filled:
-        if row["side"] == "buy" and row["fill_price"]:
-            buys.append((float(row["fill_price"]), float(row["requested_qty"] or 0)))
-        elif row["side"] == "sell" and row["fill_price"] and buys:
-            buy_price, _ = buys.pop(0)
-            if float(row["fill_price"]) > buy_price:
-                wins += 1
-
-    sell_count = sum(1 for r in filled if r["side"] == "sell")
-    win_rate = wins / sell_count if sell_count > 0 else 0.0
-
-    # sharpe — approximate from daily fill price changes (simplified)
-    if len(filled) >= 2:
-        prices = [float(r["fill_price"]) for r in filled if r["fill_price"]]
-        if len(prices) >= 2:
-            returns = [(prices[i] - prices[i - 1]) / prices[i - 1] for i in range(1, len(prices))]
-            mean_r = sum(returns) / len(returns)
-            variance = sum((r - mean_r) ** 2 for r in returns) / len(returns)
-            std_r = math.sqrt(variance) if variance > 0 else 0.001
-            sharpe = (mean_r / std_r) * math.sqrt(252) if std_r > 0 else 0.0
-        else:
-            sharpe = 0.0
-    else:
-        sharpe = 0.0
-
-    # max_drawdown from portfolio snapshot (use 0 if unavailable)
-    from trading_bot.portfolio.manager import get_portfolio_manager
-
-    snapshot = get_portfolio_manager().get_snapshot()
-    max_drawdown = abs(float(snapshot.daily_drawdown_pct))
-
+    if len(daily) < 2:
+        errors.append("at least two closed days of marked strategy equity are required")
+    if marks and (datetime.now(UTC) - marks[-1][0]).total_seconds() > 25 * 3600:
+        errors.append("marked strategy equity is stale")
+    start = marks[0][0] if marks else datetime.now(UTC)
+    completed = [r for r in trades if r["captured_at"] >= start]
+    wins = sum(float(r["realized_pnl"]) > 0 for r in completed)
+    returns: list[float] = []
+    previous = initial
+    for equity in daily.values():
+        if previous > 0:
+            returns.append(equity / previous - 1)
+        previous = equity
+    std = statistics.pstdev(returns) if returns else 0.0
+    sharpe = statistics.mean(returns) / std * math.sqrt(365) if std > 0 else 0.0
+    peak, max_dd = initial, 0.0
+    for _, equity in marks:
+        peak = max(peak, equity)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - equity) / peak)
     return StrategyMetrics(
-        days_running=days_running,
-        sharpe_ratio=round(sharpe, 4),
-        max_drawdown_pct=round(max_drawdown, 4),
-        win_rate=round(win_rate, 4),
-        total_trades=total_trades,
+        days_running=len(daily),
+        sharpe_ratio=sharpe,
+        max_drawdown_pct=max_dd,
+        win_rate=wins / len(completed) if completed else 0.0,
+        total_trades=len(completed),
+        evidence_errors=sorted(set(errors)),
     )
 
 

@@ -10,10 +10,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- Record fee-inclusive strategy equity from actual executions and fresh market
+  marks; expose `trading_strategy_equity_verified` and block promotion when
+  evidence is incomplete. Preserve all legacy evidence without inventing marks.
+- Add transactional audit append ordering, envelope hashes, predecessor checks,
+  concurrent PostgreSQL regression tests, and rollback/credential incident runbooks.
+- Require authenticated access to the production dashboard and evidence exports;
+  browser login uses `operator` and `DASHBOARD_API_KEY` (minimum 32 characters).
+
 - Add Binance WebSocket kline aggregation that persists closed bars directly to Parquet
   and tracks `trading_websocket_kline_persisted_total`.
 
 ### Fixed
+
+- Encode database UUIDs, UTC timestamps and exact monetary decimals in evidence
+  endpoints, including the previously failing session report.
+- Redact secrets in third-party HTTP logs, structured fields, object values and
+  tracebacks; hide configured secrets in settings representations and snapshots.
+- Make readiness fail closed on incomplete criteria, blocking warnings, stale
+  approvals, unverified exchange permissions, audit violations and missing parity.
+- Use completed exits and observed marked days for promotion; correct backtest
+  percentage units and prevent one strategy from selling another's inventory.
+- Restore PostgreSQL risk controls from JSON correctly and halt on unavailable
+  risk state. Reject stale quotes, non-finite orders, oversells and weakened
+  micro-live limits. Require readiness, risk checks and persistent idempotency on
+  the operator-controlled live path; real-money trading remains disabled.
+- Make dashboard flag changes explicit and idempotent, audited in the same
+  transaction, and unable to enable live trading.
+- Update vulnerable locked dependencies, require Python 3.12 and SQLAlchemy's
+  asyncio dependencies, and make dependency/source/secret scans blocking in CI.
 
 - Prevent repeated Binance IP bans by serializing REST calls, honoring `429 Retry-After`,
   persisting exchange cooldown state across Railway restarts, staggering hourly crypto

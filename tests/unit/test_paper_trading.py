@@ -145,12 +145,12 @@ class TestRiskEngine:
         assert not decision.approved
         assert "concentration" in decision.reason
 
-    def test_sell_order_bypasses_buy_checks(self) -> None:
-        # Drawdown is fine, selling should be allowed
+    def test_sell_cannot_exceed_long_inventory(self) -> None:
         snap = _empty_snapshot()
         order = _sell_order(quantity=0.01)
         decision = self.engine.pre_trade_check(order, snap, Decimal("30000"))
-        assert decision.approved
+        assert not decision.approved
+        assert "inventory" in decision.reason
 
     def test_decision_is_frozen(self) -> None:
         snap = _empty_snapshot()

@@ -91,8 +91,10 @@ class TestPaperBacktestMeans:
             days_running=40, sharpe_ratio=1.0, max_drawdown_pct=0.08, win_rate=0.5, total_trades=40
         )
         bt = MagicMock()
-        bt.metrics.win_rate = 0.6
-        bt.metrics.max_drawdown_pct = 0.10
+        bt.metrics.win_rate = 60.0
+        bt.metrics.total_trades = 40
+        bt.strategy_id = "sma"
+        bt.metrics.max_drawdown_pct = 10.0
 
         with (
             patch("trading_bot.strategies.registry.get_strategy_registry", return_value=registry),
@@ -110,6 +112,8 @@ class TestPaperBacktestMeans:
         assert b_dd == 0.10
 
 
-def test_rollback_runbook_absent() -> None:
-    # The deployment-rollback runbook has not been written yet — check is honest.
-    assert builder._rollback_runbook_exists() is False
+def test_rollback_runbook_is_resolved_independently_of_working_directory(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert builder._rollback_runbook_exists() is True

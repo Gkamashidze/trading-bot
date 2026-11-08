@@ -112,6 +112,7 @@ class TestRouterRiskRejection:
             mock_risk.pre_trade_check.return_value = mock_decision
             mock_tick = MagicMock()
             mock_tick.price = Decimal("50000")
+            mock_tick.timestamp = datetime.now(UTC)
             mock_cache.return_value.get.return_value = mock_tick
 
             tracker = MagicMock()
@@ -229,6 +230,7 @@ class TestRouterPartialFill:
             )
             mock_tick = MagicMock()
             mock_tick.price = Decimal("50000")
+            mock_tick.timestamp = datetime.now(UTC)
             mock_cache.return_value.get.return_value = mock_tick
 
             tracker = MagicMock()

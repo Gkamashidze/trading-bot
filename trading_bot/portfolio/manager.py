@@ -52,9 +52,13 @@ class PortfolioManager:
         fill_price: Decimal,
         fee_rate: Decimal = Decimal("0.001"),
         filled_quantity: Decimal | None = None,
+        fee_paid: Decimal | None = None,
     ) -> None:
         sym = order.symbol
         qty = filled_quantity if filled_quantity is not None else order.quantity
+        fee = fee_paid if fee_paid is not None else qty * fill_price * fee_rate
+        if not fee.is_finite() or fee < 0:
+            raise ValueError("fill fee must be finite and nonnegative")
         if qty <= 0:
             log.warning(
                 "paper_fill_ignored_zero_quantity",
@@ -66,7 +70,7 @@ class PortfolioManager:
             return
 
         if order.side == OrderSide.BUY:
-            cost = qty * fill_price * (1 + fee_rate)
+            cost = qty * fill_price + fee
             self._cash -= cost
 
             if sym in self._qty:
@@ -85,7 +89,7 @@ class PortfolioManager:
             self._current_price[sym] = fill_price
 
         elif order.side == OrderSide.SELL:
-            proceeds = qty * fill_price * (1 - fee_rate)
+            proceeds = qty * fill_price - fee
             self._cash += proceeds
 
             if sym in self._qty:

@@ -25,6 +25,7 @@ from trading_bot.risk.capital_policy import (
     CapitalPolicyEngine,
     get_capital_policy_engine,
 )
+from trading_bot.state.risk_state import RiskStateSnapshot
 
 log = get_logger(__name__)
 
@@ -74,9 +75,28 @@ class RiskEngine:
         fill_price: Decimal,
         asset_class: AssetClass = AssetClass.CRYPTO,
         weekly_pnl_pct: float = 0.0,
+        risk_state: RiskStateSnapshot | None = None,
     ) -> RiskDecision:
+        if risk_state is None and get_settings().environment in {"staging", "production"}:
+            return RiskDecision(False, "authoritative risk state is required")
+        if risk_state is not None:
+            if risk_state.is_trading_globally_blocked:
+                return RiskDecision(False, "persistent safety halt is active")
+            state = risk_state.strategy_states.get(order.strategy_id)
+            if state is not None and state not in {"active", "reduced_risk"}:
+                return RiskDecision(False, "strategy is paused in persistent risk state")
+            if order.symbol in risk_state.operator_locks:
+                return RiskDecision(False, "asset is locked by the operator")
         risk = get_settings().risk
         equity = snapshot.total_equity
+
+        numeric = (fill_price, equity, snapshot.cash_balance, snapshot.daily_drawdown_pct)
+        if not all(value.is_finite() for value in numeric) or fill_price <= 0:
+            return RiskDecision(False, "non-finite portfolio data or invalid execution price")
+        if order.side == OrderSide.SELL:
+            available = sum(p.quantity for p in snapshot.positions if p.symbol == order.symbol)
+            if order.quantity > available:
+                return RiskDecision(False, "sell quantity exceeds available long inventory")
 
         if equity <= 0:
             return RiskDecision(False, "portfolio equity is zero or negative")

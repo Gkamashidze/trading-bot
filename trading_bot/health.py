@@ -45,7 +45,11 @@ async def _health_handler(request: web.Request) -> web.Response:
     return web.json_response(body)
 
 
-async def start_health_server(host: str = "0.0.0.0", port: int = 8000) -> web.AppRunner:  # noqa: S104
+# Container ingress requires listening on every interface.
+async def start_health_server(
+    host: str = "0.0.0.0",  # noqa: S104  # nosec B104
+    port: int = 8000,
+) -> web.AppRunner:
     """Start the health check HTTP server. Returns runner for graceful shutdown."""
     app = web.Application()
     app.router.add_get("/health", _health_handler)

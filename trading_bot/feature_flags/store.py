@@ -144,6 +144,10 @@ class FeatureFlagStore(FeatureFlagStoreInterface):
             reason=reason,
         )
 
+    def invalidate(self, flag_name: str) -> None:
+        """Discard a stale cached value after an audited external flag update."""
+        self._cache.pop(flag_name, None)
+
     async def refresh(self) -> None:
         """Reload all flags from DB into cache."""
         try:

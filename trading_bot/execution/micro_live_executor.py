@@ -17,6 +17,7 @@ On testnet this exercises the whole path with fake money and zero risk.
 
 from __future__ import annotations
 
+import hashlib
 from decimal import Decimal
 from typing import cast
 
@@ -30,6 +31,11 @@ from trading_bot.core.models import (
 )
 from trading_bot.observability.logging import get_logger
 from trading_bot.promotion.micro_live import MicroLiveGate
+from trading_bot.state.risk_state import (
+    PostgresRiskStateStore,
+    RiskStateSnapshot,
+    get_risk_state_store,
+)
 
 log = get_logger(__name__)
 
@@ -57,6 +63,7 @@ class MicroLiveExecutor:
         side: str,
         usd_notional: Decimal | float | str,
         operator: str,
+        idempotency_key: str = "",
     ) -> dict[str, object]:
         """Submit one micro-live order. Raises MicroLiveRefusedError if any gate blocks."""
         from trading_bot.feature_flags import is_enabled
@@ -65,9 +72,18 @@ class MicroLiveExecutor:
         if not await is_enabled("live_trading_enabled"):
             raise MicroLiveRefusedError("live_trading_enabled is false — refusing live order")
 
-        notional = Decimal(str(usd_notional))
+        if not operator.strip() or side.upper() not in {"BUY", "SELL"}:
+            raise MicroLiveRefusedError(
+                "a named operator and explicit BUY or SELL side are required"
+            )
+        try:
+            notional = Decimal(str(usd_notional))
+        except Exception as exc:
+            raise MicroLiveRefusedError("invalid order notional") from exc
+        if not notional.is_finite() or notional <= 0:
+            raise MicroLiveRefusedError("order notional must be finite and positive")
         price = await self._exchange.reference_price(symbol)  # type: ignore[attr-defined]
-        if price is None or price <= 0:
+        if price is None or not price.is_finite() or price <= 0:
             raise MicroLiveRefusedError(f"no reference price available for {symbol}")
 
         from trading_bot.portfolio.manager import get_portfolio_manager
@@ -83,6 +99,12 @@ class MicroLiveExecutor:
         if not allowed:
             raise MicroLiveRefusedError(f"micro-live gate refused: {reason}")
 
+        # Paper state cannot certify a real account. The live readiness report,
+        # persistent safety controls and idempotency store are required too.
+        safety_state = await self._check_system_readiness()
+        if not idempotency_key.strip():
+            raise MicroLiveRefusedError("an explicit idempotency key is required")
+
         side_enum = OrderSide.BUY if side.upper() == "BUY" else OrderSide.SELL
         qty = notional / price
         order = OrderRequest(
@@ -92,7 +114,20 @@ class MicroLiveExecutor:
             order_type=OrderType.MARKET,
             quantity=qty,
             strategy_id=self._strategy_id,
+            client_order_id="ml" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:30],
+            idempotency_key=idempotency_key,
         )
+
+        from trading_bot.idempotency.decorator import _default_store
+        from trading_bot.risk.engine import RiskEngine
+
+        decision = RiskEngine().pre_trade_check(order, snapshot, price, risk_state=safety_state)
+        if not decision.approved:
+            raise MicroLiveRefusedError(f"risk engine refused: {decision.reason}")
+        if _default_store is None or not await _default_store.acquire(
+            "micro_live:" + idempotency_key
+        ):
+            raise MicroLiveRefusedError("persistent idempotency unavailable or duplicate request")
 
         log.warning(
             "micro_live_order_submitting",
@@ -107,6 +142,34 @@ class MicroLiveExecutor:
         fill = cast("dict[str, object]", raw)
         await self._record_fill(order, fill, side_enum)
         return fill
+
+    async def _check_system_readiness(self) -> RiskStateSnapshot:
+        from trading_bot.database.connection import get_pool
+        from trading_bot.go_live.builder import build_go_live_gate
+        from trading_bot.oms.reconciler import get_reconciler
+
+        reconciler = get_reconciler()
+        if reconciler is None or reconciler.orders_blocked:
+            raise MicroLiveRefusedError("clean reconciliation is required")
+        store = get_risk_state_store()
+        if not isinstance(store, PostgresRiskStateStore):
+            raise MicroLiveRefusedError("persistent risk state is required for real orders")
+        state = await store.get_snapshot()
+        if state.is_trading_globally_blocked:
+            raise MicroLiveRefusedError("persistent safety halt is active")
+        self._gate.session.daily_realized_loss_usd = max(
+            self._gate.session.daily_realized_loss_usd, state.daily_loss_usd
+        )
+        self._gate.session.weekly_realized_loss_usd = max(
+            self._gate.session.weekly_realized_loss_usd, state.weekly_loss_usd
+        )
+        try:
+            report = await (await build_go_live_gate(get_pool(), for_execution=True)).evaluate()
+        except Exception as exc:
+            raise MicroLiveRefusedError("readiness evidence unavailable") from exc
+        if not report.ready:
+            raise MicroLiveRefusedError("go-live readiness report is not approved")
+        return state
 
     async def _record_fill(
         self, order: OrderRequest, fill: dict[str, object], side: OrderSide
@@ -155,6 +218,9 @@ class MicroLiveExecutor:
 
         # Update micro-live loss budgets (may auto-rollback to paper on breach).
         self._gate.record_fill(realized_pnl, actual_qty * actual_price)
+        if realized_pnl < 0:
+            await get_risk_state_store().record_loss(-realized_pnl, "daily")
+            await get_risk_state_store().record_loss(-realized_pnl, "weekly")
 
         from trading_bot.evidence.recorder import record_fill_evidence
 

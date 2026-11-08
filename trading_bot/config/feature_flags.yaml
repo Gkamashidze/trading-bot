@@ -47,6 +47,18 @@ flags:
     owner: "infra"
     critical: false
 
+  strategy_marked_evidence_enabled:
+    default: true
+    description: "Records fee-inclusive marked strategy equity; missing evidence blocks promotion"
+    owner: "quant"
+    critical: false
+
+  deployment_verification_enabled:
+    default: true
+    description: "Runs authenticated read-only endpoint checks after production startup"
+    owner: "ops"
+    critical: false
+
   # ── Per-strategy flags (Stage 3+) ─────────────────────────────────────────
   strategy_sma_enabled:
     default: false

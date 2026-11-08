@@ -1,5 +1,5 @@
 # Production Readiness Roadmap
-Last updated: 2026-05-11
+Last updated: 2026-11-08
 
 ## Gate Requirements Before Micro-Live
 - 30+ calendar days of paper trading
@@ -22,9 +22,15 @@ Last updated: 2026-05-11
 - trading_bot/data/lineage.py — `LineageStore` persisted to `/data/lineage_store.json`
 107 unit tests, ruff + mypy clean.
 
-## Build Before Micro-Live
-- BinanceOrderBookProvider
-- GoLiveGate.evaluate()
+## Before Micro-Live
+- Collect at least 30 clean observed days and 100 completed round trips. Legacy
+  estimates are retained but do not replace verified marked strategy evidence.
+- Confirm paper/backtest parity on comparable periods and strategy scope.
+- Investigate any historical audit integrity failure; never rewrite old events.
+- Complete the live API permission audit and venue-specific reconciliation drill.
+- Obtain a current named risk review and explicit operator approval.
+- Rehearse the documented rollback and venue position-close procedure.
+- Keep both live execution gates disabled until every requirement passes.
 
 ## Build Before Live
 - AuditReplayer
@@ -32,6 +38,10 @@ Last updated: 2026-05-11
 - Grafana dashboards
 - Penetration testing
 
-## Blocked Until Stage 5
-- BinanceExchange.place_order() raises NotImplementedError
-- replace_order() not implemented
+## Execution status
+- Binance order submission is implemented and available only through the explicit
+  gated operator workflow. It is not enabled or used by the automated runner.
+- The gate is not an assertion of profitable strategy performance. SMA/RSI are
+  infrastructure baselines; sentiment research has limited historical evidence.
+- See ADR-0010 and the 2026-11-08 readiness/security verification record for the
+  changes and remaining operational requirements.

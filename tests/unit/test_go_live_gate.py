@@ -41,7 +41,10 @@ def _full_gate(
         exchange=exchange,
         feature_flags=feature_flags,
         reconciler_last_run_clean=True,
-        paper_trading_days=10,
+        paper_trading_days=40,
+        paper_round_trips=120,
+        exchange_permissions_verified=True,
+        audit_chain_verified=True,
         paper_win_rate=0.55,
         paper_drawdown_pct=0.08,
         backtest_win_rate=0.60,
@@ -286,8 +289,15 @@ class TestOperatorApproval:
     async def test_approval_persisted_to_audit_log(
         self, mock_audit_log: AsyncMock, mock_exchange: AsyncMock
     ) -> None:
-        gate = GoLiveGate(audit_log=mock_audit_log, exchange=mock_exchange)
-        approval = await gate.record_approval(operator="charlie", comment="LGTM")
+        flags = AsyncMock()
+        flags.is_enabled.side_effect = lambda name: name != "live_trading_enabled"
+        gate = _full_gate(mock_audit_log, mock_exchange, flags)
+        approval = await gate.record_approval(
+            operator="charlie",
+            comment="reviewed",
+            rollback_plan_confirmed=True,
+            risk_sign_off_by="charlie",
+        )
         assert approval.operator == "charlie"
         assert approval.approved is True
         # Should have been called for both evaluate() inside record_approval and the approval event

@@ -26,6 +26,8 @@ from typing import Any, cast
 
 import structlog
 
+from trading_bot.observability.redaction import redact_log_event
+
 # ContextVar carries the correlation ID across async tasks
 _correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="")
 _strategy_id_var: ContextVar[str] = ContextVar("strategy_id", default="")
@@ -119,6 +121,8 @@ def configure_logging(
         foreign_pre_chain=shared_processors,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.processors.format_exc_info,
+            redact_log_event,
             renderer,
         ],
     )
@@ -132,7 +136,7 @@ def configure_logging(
     root_logger.setLevel(log_level)
 
     # Quieten noisy libraries
-    for noisy in ("asyncio", "ccxt", "aiohttp", "websockets"):
+    for noisy in ("asyncio", "ccxt", "aiohttp", "websockets", "httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

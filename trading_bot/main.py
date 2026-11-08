@@ -60,7 +60,7 @@ async def _run_dashboard() -> None:
     app = create_app()
     config = uvicorn.Config(
         app,
-        host="0.0.0.0",  # noqa: S104
+        host="0.0.0.0",  # noqa: S104  # nosec B104
         port=port,
         log_level="warning",  # uvicorn logs go through structlog instead
         access_log=False,
@@ -305,7 +305,7 @@ async def _startup() -> tuple[
             note="Set TELEGRAM_BOT_TOKEN + TELEGRAM_ALERT_CHAT_ID",
         )
     else:
-        await alerter.send_startup(environment=settings.environment, stage="0")
+        await alerter.send_startup(environment=settings.environment, stage="8")
 
     # ── DATA_PATH volume sanity check ─────────────────────────────────────
     _data_path = os.environ.get("DATA_PATH", "data/raw")
@@ -322,7 +322,7 @@ async def _startup() -> tuple[
         "trading_bot_started",
         environment=settings.environment,
         config_version=settings.config_version,
-        stage="0",
+        stage="8",
         live_trading="DISABLED",
         binance_testnet=settings.binance.testnet,
         dashboard_url="http://0.0.0.0:8000",
@@ -365,18 +365,40 @@ async def main_async() -> None:
     pool = None
     alerter = None
     ws_client = None
+    shutdown_task: asyncio.Task[None] | None = None
+    verification_task: asyncio.Task[dict[str, object]] | None = None
     try:
         scheduler, pool, alerter, ws_client = await _startup()
-        await asyncio.gather(
-            dashboard_task,
-            wait_for_shutdown(),
-            return_exceptions=True,
+        from trading_bot.feature_flags import is_enabled
+        from trading_bot.observability.deployment_check import verify_deployment
+
+        if get_settings().environment == "production" and await is_enabled(
+            "deployment_verification_enabled"
+        ):
+            verification_task = asyncio.create_task(verify_deployment())
+        shutdown_task = asyncio.create_task(wait_for_shutdown())
+        done, _ = await asyncio.wait(
+            {dashboard_task, shutdown_task},
+            return_when=asyncio.FIRST_COMPLETED,
         )
+        if dashboard_task in done:
+            await dashboard_task
     except Exception as e:
         log.error("startup_failed", error=str(e), exc_info=True)
         dashboard_task.cancel()
         sys.exit(1)
     finally:
+        for task in (dashboard_task, shutdown_task, verification_task):
+            if task is not None:
+                task.cancel()
+        await asyncio.gather(
+            *(
+                task
+                for task in (dashboard_task, shutdown_task, verification_task)
+                if task is not None
+            ),
+            return_exceptions=True,
+        )
         await _shutdown(scheduler, pool, alerter, ws_client)
 
 
