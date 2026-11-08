@@ -781,9 +781,10 @@ def register_default_jobs(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         reconciliation_job,
         trigger="interval",
-        minutes=30,
+        minutes=1,
+        next_run_time=datetime.now(UTC),
         id="reconciliation",
-        name="OMS↔exchange reconciliation + evidence (30 min)",
+        name="OMS↔exchange reconciliation + evidence (1 min)",
         replace_existing=True,
     )
 
