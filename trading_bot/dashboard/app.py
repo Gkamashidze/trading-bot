@@ -21,16 +21,19 @@ import asyncio
 import os
 import time
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
-from fastapi.security import APIKeyHeader
 from fastapi.templating import Jinja2Templates
 
 from trading_bot.backtesting.runner import get_last_backtest_at, get_latest_backtest
+from trading_bot.dashboard.security import HEALTH_PATHS, require_dashboard_auth
 from trading_bot.observability.logging import get_logger
 from trading_bot.oms.tracker import get_order_tracker
 from trading_bot.portfolio.manager import get_portfolio_manager
@@ -101,24 +104,31 @@ def init_dashboard(pool: Any, scheduler: Any) -> None:
     _scheduler = scheduler
 
 
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-def _require_api_key(api_key: str | None = Security(_api_key_header)) -> None:
-    """Protect state-changing endpoints with an API key.
-
-    Set DASHBOARD_API_KEY env var. If unset, auth is disabled (dev mode only).
-    """
-    expected = os.environ.get("DASHBOARD_API_KEY", "")
-    environment = os.environ.get("ENVIRONMENT", "development").lower()
-    if not expected and environment in {"staging", "production"}:
-        raise HTTPException(status_code=503, detail="DASHBOARD_API_KEY is required")
-    if expected and api_key != expected:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+def _json_response(content: Any, **kwargs: Any) -> JSONResponse:
+    """Encode database UUIDs, UTC datetimes and exact monetary decimals."""
+    return JSONResponse(jsonable_encoder(content, custom_encoder={Decimal: str}), **kwargs)
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Trading Bot Dashboard", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Trading Bot Dashboard", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def authenticate_dashboard(request: Request, call_next: Any) -> Response:
+        if request.url.path not in HEALTH_PATHS:
+            try:
+                require_dashboard_auth(request)
+            except HTTPException as exc:
+                return _json_response(
+                    {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers
+                )
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        if os.environ.get("ENVIRONMENT", "development").lower() == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        return response
 
     # CORS — restrict to configured origin in production
     allowed_origin_env = os.environ.get("DASHBOARD_ALLOWED_ORIGIN")
@@ -143,6 +153,9 @@ def create_app() -> FastAPI:
             "db_connected": _pool is not None,
             "scheduler_running": _scheduler is not None and _scheduler.running,
             "stage": "8",
+            "commit": os.environ.get(
+                "RAILWAY_GIT_COMMIT_SHA", os.environ.get("GIT_COMMIT", "unknown")
+            ),
             "live_trading_enabled": False,
         }
 
@@ -154,7 +167,7 @@ def create_app() -> FastAPI:
         Does NOT check DB or scheduler state (that would cause restart loops
         during DB maintenance windows).
         """
-        return JSONResponse({"status": "alive", "uptime_seconds": int(time.time() - _start_time)})
+        return _json_response({"status": "alive", "uptime_seconds": int(time.time() - _start_time)})
 
     @app.get("/readyz", response_class=JSONResponse)
     async def readyz() -> JSONResponse:
@@ -180,7 +193,7 @@ def create_app() -> FastAPI:
             "scheduler_running": sched_ok,
         }
         status_code = 200 if ready else 503
-        return JSONResponse(body, status_code=status_code)
+        return _json_response(body, status_code=status_code)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
@@ -269,40 +282,54 @@ def create_app() -> FastAPI:
 
     @app.post("/flags/{name}/toggle", response_class=HTMLResponse)
     async def toggle_flag(
-        name: str, request: Request, _auth: None = Depends(_require_api_key)
+        name: str, request: Request, _auth: None = Depends(require_dashboard_auth)
     ) -> HTMLResponse:
+        if name == "live_trading_enabled":
+            raise HTTPException(
+                403, "Live trading requires the separate operator approval workflow"
+            )
+        values = parse_qs((await request.body()).decode("utf-8"))
+        desired = values.get("enabled", [])
+        if desired not in (["true"], ["false"]):
+            raise HTTPException(422, "An explicit enabled=true or enabled=false value is required")
+        enabled = desired == ["true"]
         if _pool is None:
             return HTMLResponse("<p class='text-red-500'>DB not connected</p>", status_code=503)
         try:
-            async with _pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    """UPDATE feature_flags
-                       SET enabled = NOT enabled,
-                           changed_by = 'dashboard',
-                           changed_at = NOW()
-                       WHERE flag_name = $1
-                       RETURNING flag_name AS name, enabled, reason AS description""",
-                    name,
-                )
-            if row is None:
-                return HTMLResponse("<p class='text-red-500'>Flag not found</p>", status_code=404)
-            log.info("feature_flag_toggled", flag=name, enabled=row["enabled"])
-            # Write to hash-chained audit log (S4 — compliance trail)
-            try:
-                from trading_bot.database.audit_log import PostgresAuditLog
+            from trading_bot.database.audit_log import PostgresAuditLog
+            from trading_bot.feature_flags.store import get_default_store
 
-                audit = PostgresAuditLog(_pool)
-                await audit.append(
-                    event_type="feature_flag_toggled",
-                    payload={"flag": name, "enabled": row["enabled"]},
-                    actor="dashboard",
-                )
-            except Exception as audit_err:
-                log.warning("flag_toggle_audit_failed", flag=name, error=str(audit_err))
-            flags = [dict(row)]
-        except Exception as e:
-            log.error("flag_toggle_failed", flag=name, error=str(e))
-            return HTMLResponse(f"<p class='text-red-500'>Error: {e}</p>", status_code=500)
+            async with _pool.acquire() as conn:
+                async with conn.transaction():
+                    row = await conn.fetchrow(
+                        """SELECT flag_name AS name, enabled, reason AS description
+                           FROM feature_flags WHERE flag_name = $1 FOR UPDATE""",
+                        name,
+                    )
+                    if row is None:
+                        raise HTTPException(404, "Flag not found")
+                    if row["enabled"] != enabled:
+                        await conn.execute(
+                            """UPDATE feature_flags SET enabled = $2,
+                               changed_by = 'dashboard', changed_at = NOW() WHERE flag_name = $1""",
+                            name,
+                            enabled,
+                        )
+                        await PostgresAuditLog(_pool).append(
+                            event_type="feature_flag_changed",
+                            payload={"flag": name, "enabled": enabled},
+                            actor="dashboard",
+                            connection=conn,
+                        )
+                    flags = [{**dict(row), "enabled": enabled}]
+            store = get_default_store()
+            if store is not None:
+                store.invalidate(name)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            log.error("flag_update_failed", flag=name, error=str(exc))
+            return HTMLResponse("<p class='text-red-500'>Flag update failed</p>", status_code=500)
 
         return templates.TemplateResponse(
             request=request,
@@ -377,7 +404,7 @@ def create_app() -> FastAPI:
 
     @app.post("/admin/backfill", response_class=JSONResponse)
     async def trigger_backfill(
-        request: Request, _auth: None = Depends(_require_api_key)
+        request: Request, _auth: None = Depends(require_dashboard_auth)
     ) -> JSONResponse:
         """Start a historical OHLCV backfill as a background task.
 
@@ -387,7 +414,7 @@ def create_app() -> FastAPI:
         global _backfill_status
 
         if _backfill_status["running"]:
-            return JSONResponse(
+            return _json_response(
                 {"error": "backfill already running", **_backfill_status}, status_code=409
             )
 
@@ -401,11 +428,11 @@ def create_app() -> FastAPI:
 
         allowed = _allowed_symbols()
         if symbol not in allowed:
-            return JSONResponse(
+            return _json_response(
                 {"error": f"symbol must be one of {sorted(allowed)}"}, status_code=400
             )
         if timeframe not in _ALLOWED_TIMEFRAMES:
-            return JSONResponse(
+            return _json_response(
                 {"error": f"timeframe must be one of {sorted(_ALLOWED_TIMEFRAMES)}"},
                 status_code=400,
             )
@@ -487,13 +514,13 @@ def create_app() -> FastAPI:
         global _backfill_task
         _backfill_task = asyncio.create_task(_run_backfill())
         log.info("backfill_triggered", symbol=symbol, timeframe=timeframe, days_back=days_back)
-        return JSONResponse(
+        return _json_response(
             {"status": "started", "symbol": symbol, "timeframe": timeframe, "days_back": days_back}
         )
 
     @app.get("/admin/backfill/status", response_class=JSONResponse)
     async def backfill_status_endpoint() -> JSONResponse:
-        return JSONResponse(_backfill_status)
+        return _json_response(_backfill_status)
 
     @app.get("/partials/prices", response_class=HTMLResponse)
     async def partial_prices(request: Request) -> HTMLResponse:
@@ -728,9 +755,9 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         row = await ev_store.get_session_report(session_id)
-        return JSONResponse(row)
+        return _json_response(row)
 
     @app.get("/evidence/daily", response_class=JSONResponse)
     async def evidence_daily() -> JSONResponse:
@@ -739,9 +766,9 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         rows = await ev_store.list_daily_summaries(session_id, limit=90)
-        return JSONResponse(rows)
+        return _json_response(rows)
 
     @app.get("/evidence/weekly", response_class=JSONResponse)
     async def evidence_weekly() -> JSONResponse:
@@ -750,9 +777,9 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         rows = await ev_store.list_weekly_summaries(session_id, limit=12)
-        return JSONResponse(rows)
+        return _json_response(rows)
 
     @app.get("/evidence/portfolio_snapshots", response_class=JSONResponse)
     async def evidence_portfolio_snapshots() -> JSONResponse:
@@ -761,9 +788,9 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         rows = await ev_store.list_portfolio_snapshots(session_id, limit=50)
-        return JSONResponse(rows)
+        return _json_response(rows)
 
     @app.get("/evidence/reconciliation", response_class=JSONResponse)
     async def evidence_reconciliation() -> JSONResponse:
@@ -772,9 +799,9 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         rows = await ev_store.list_reconciliation_reports(session_id, limit=50)
-        return JSONResponse(rows)
+        return _json_response(rows)
 
     @app.get("/evidence/report", response_class=JSONResponse)
     async def evidence_report() -> JSONResponse:
@@ -783,9 +810,9 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         row = await ev_store.get_session_report(session_id)
-        return JSONResponse(row)
+        return _json_response(row)
 
     @app.get("/evidence/final_report", response_class=JSONResponse)
     async def evidence_final_report() -> JSONResponse:
@@ -795,36 +822,33 @@ def create_app() -> FastAPI:
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         reporter = EvidenceReporter(ev_store)
         report = await reporter.generate_final_report(session_id)
-        return JSONResponse(report.model_dump(mode="json"))
+        return _json_response(report.model_dump(mode="json"))
 
     @app.get("/go_live/report", response_class=JSONResponse)
     async def go_live_report() -> JSONResponse:
         """Evaluate the go-live readiness gate (read-only; never enables live)."""
         if _pool is None:
-            return JSONResponse({"error": "db_not_connected"}, status_code=503)
+            return _json_response({"error": "db_not_connected"}, status_code=503)
         from trading_bot.go_live.builder import build_go_live_gate
 
         gate = await build_go_live_gate(_pool)
         report = await gate.evaluate()
-        return JSONResponse(report.model_dump(mode="json"))
+        return _json_response(report.model_dump(mode="json"))
 
     @app.get("/evidence/export/json", response_class=JSONResponse)
-    async def evidence_export_json(x_api_key: str = "") -> JSONResponse:
-        import os
+    async def evidence_export_json(_auth: None = Depends(require_dashboard_auth)) -> JSONResponse:
 
         from trading_bot.evidence import get_current_session_id, get_evidence_store
 
-        if x_api_key != os.environ.get("DASHBOARD_API_KEY", ""):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         data = await ev_store.export_session_json(session_id)
-        return JSONResponse(data)
+        return _json_response(data)
 
     @app.get("/partials/asset_universe", response_class=HTMLResponse)
     async def partial_asset_universe(request: Request) -> HTMLResponse:
@@ -870,19 +894,16 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/evidence/export/csv")
-    async def evidence_export_csv(x_api_key: str = "") -> Response:
-        import os
+    async def evidence_export_csv(_auth: None = Depends(require_dashboard_auth)) -> Response:
 
         from starlette.responses import Response as StarletteResponse
 
         from trading_bot.evidence import get_current_session_id, get_evidence_store
 
-        if x_api_key != os.environ.get("DASHBOARD_API_KEY", ""):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
         ev_store = get_evidence_store()
         session_id = get_current_session_id()
         if ev_store is None or session_id is None:
-            return JSONResponse({"error": "evidence_store_not_initialised"}, status_code=503)
+            return _json_response({"error": "evidence_store_not_initialised"}, status_code=503)
         csv_text = await ev_store.export_session_csv(session_id)
         return StarletteResponse(
             content=csv_text,

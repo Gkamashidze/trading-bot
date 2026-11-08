@@ -720,7 +720,8 @@ class EvidenceStore:
                 session_id,
             )
             incident_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM evidence_alert_incidents WHERE session_id = $1",
+                """SELECT COUNT(*) FROM evidence_alert_incidents
+                   WHERE session_id = $1 AND severity = 'critical' AND cleared_at IS NULL""",
                 session_id,
             )
             daily_count = await conn.fetchval(
@@ -981,7 +982,7 @@ def _serialise_row(row: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(v, date):
             out[k] = v.isoformat()
         elif isinstance(v, Decimal):
-            out[k] = float(v)
+            out[k] = str(v)
         elif isinstance(v, uuid.UUID):
             out[k] = str(v)
         else:

@@ -11,7 +11,7 @@ ON CONFLICT DO NOTHING.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -20,9 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _require_utc(v: datetime) -> datetime:
-    if v.tzinfo is None:
+    if v.tzinfo is None or v.utcoffset() is None:
         raise ValueError("datetime must be UTC-aware; naive datetimes are rejected")
-    return v
+    return v.astimezone(UTC)
 
 
 class SessionStatus(StrEnum):

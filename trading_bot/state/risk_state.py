@@ -15,6 +15,7 @@ records a timestamp and actor for each mutation to support audit replay.
 from __future__ import annotations
 
 import asyncio
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -276,6 +277,15 @@ class InMemoryRiskStateStore(RiskStateStore):
         self._state.version += 1
 
 
+def _json_mapping(value: Any) -> dict[str, Any]:
+    decoded = json.loads(value) if isinstance(value, str) else value
+    if decoded is None:
+        return {}
+    if not isinstance(decoded, dict):
+        raise ValueError("risk state JSON must be an object")
+    return dict(decoded)
+
+
 class PostgresRiskStateStore(RiskStateStore):
     """Single-row Postgres risk state store (id=1).
 
@@ -295,7 +305,9 @@ class PostgresRiskStateStore(RiskStateStore):
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow("SELECT * FROM risk_state WHERE id = 1")
             if row is None:
-                return RiskStateSnapshot()
+                return RiskStateSnapshot(
+                    kill_switch_active=True, kill_switch_reason="risk state missing"
+                )
             halt_reason: EmergencyHaltReason | None = None
             if row["emergency_halt_reason"] is not None:
                 try:
@@ -303,7 +315,7 @@ class PostgresRiskStateStore(RiskStateStore):
                 except ValueError:
                     pass
             return RiskStateSnapshot(
-                strategy_states=dict(row["strategy_states"] or {}),
+                strategy_states=_json_mapping(row["strategy_states"]),
                 kill_switch_active=row["kill_switch_active"],
                 kill_switch_reason=row["kill_switch_reason"] or "",
                 kill_switch_activated_by=row["kill_switch_activated_by"] or "",
@@ -313,9 +325,10 @@ class PostgresRiskStateStore(RiskStateStore):
                 daily_loss_usd=Decimal(str(row["daily_loss_usd"])),
                 weekly_loss_usd=Decimal(str(row["weekly_loss_usd"])),
                 capital_allocation_overrides={
-                    k: float(v) for k, v in (row["capital_allocation_overrides"] or {}).items()
+                    k: float(v)
+                    for k, v in _json_mapping(row["capital_allocation_overrides"]).items()
                 },
-                operator_locks=dict(row["operator_locks"] or {}),
+                operator_locks=_json_mapping(row["operator_locks"]),
                 emergency_halt_active=row["emergency_halt_active"],
                 emergency_halt_reason=halt_reason,
                 emergency_halt_at=row["emergency_halt_at"],
@@ -326,7 +339,9 @@ class PostgresRiskStateStore(RiskStateStore):
             )
         except Exception as exc:
             _log().warning("risk_state_get_failed", error=str(exc))
-            return RiskStateSnapshot()
+            return RiskStateSnapshot(
+                kill_switch_active=True, kill_switch_reason="risk state unavailable"
+            )
 
     async def activate_kill_switch(self, reason: str, actor: str) -> None:
         async with self._pool.acquire() as conn:

@@ -29,6 +29,7 @@ Persistence:
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from typing import Any
 
@@ -69,14 +70,17 @@ class GoLiveGate:
         reconciler_last_run_clean: bool = False,
         paper_trading_days: int = 0,
         paper_round_trips: int = 0,
-        min_paper_days: int = 0,
-        min_round_trips: int = 0,
+        min_paper_days: int = 30,
+        min_round_trips: int = 100,
         paper_win_rate: float | None = None,
         paper_drawdown_pct: float | None = None,
         backtest_win_rate: float | None = None,
         backtest_drawdown_pct: float | None = None,
         risk_sign_off_by: str = "",
         rollback_runbook_exists: bool = False,
+        exchange_permissions_verified: bool = False,
+        audit_chain_verified: bool = False,
+        live_execution_requested: bool = False,
     ) -> None:
         self._audit_log = audit_log
         self._exchange = exchange
@@ -85,8 +89,11 @@ class GoLiveGate:
         self._reconciler_last_run_clean = reconciler_last_run_clean
         self._paper_trading_days = paper_trading_days
         self._paper_round_trips = paper_round_trips
-        self._min_paper_days = min_paper_days
-        self._min_round_trips = min_round_trips
+        self._min_paper_days = max(30, min_paper_days)
+        self._min_round_trips = max(100, min_round_trips)
+        self._exchange_permissions_verified = exchange_permissions_verified
+        self._audit_chain_verified = audit_chain_verified
+        self._live_execution_requested = live_execution_requested
         self._paper_win_rate = paper_win_rate
         self._paper_drawdown_pct = paper_drawdown_pct
         self._backtest_win_rate = backtest_win_rate
@@ -115,7 +122,6 @@ class GoLiveGate:
                            rollback_plan_confirmed, risk_sign_off_by, checklist_snapshot,
                            correlation_id
                     FROM go_live_approvals
-                    WHERE approved = TRUE
                     ORDER BY approved_at DESC
                     LIMIT 1
                     """,
@@ -143,7 +149,10 @@ class GoLiveGate:
                 risk_sign_off_by=row["risk_sign_off_by"] or "",
                 checklist_snapshot=snapshot,
             )
+            if not approval.approved or not approval.is_current:
+                return None
             self._approval = approval
+            self._risk_sign_off_by = approval.risk_sign_off_by
             log.info(
                 "go_live_approval_recovered",
                 approval_id=str(row["approval_id"]),
@@ -224,11 +233,21 @@ class GoLiveGate:
         if not operator:
             raise ValueError("operator name is required for go-live approval")
 
+        if not rollback_plan_confirmed or not (risk_sign_off_by or self._risk_sign_off_by).strip():
+            raise ValueError("rollback confirmation and a named risk sign-off are required")
+
         if not correlation_id:
             correlation_id = str(uuid.uuid4())
 
         # Capture current report state as snapshot
         report = await self.evaluate()
+        technical_failures = [
+            result.criterion_id
+            for result in report.failed_blocking
+            if result.criterion_id not in {"operator_approval", "risk_sign_off"}
+        ]
+        if technical_failures:
+            raise ValueError(f"cannot approve failing readiness checks: {technical_failures}")
         snapshot: dict[str, Any] = {
             "evaluated_at": report.evaluated_at.isoformat(),
             "criteria": [
@@ -247,25 +266,46 @@ class GoLiveGate:
             risk_sign_off_by=effective_risk_sign_off,
             checklist_snapshot=snapshot,
         )
+
+        from trading_bot.database.audit_log import PostgresAuditLog
+
+        payload = {
+            "approval_id": approval.approval_id,
+            "operator": operator,
+            "comment": comment,
+            "rollback_plan_confirmed": rollback_plan_confirmed,
+            "risk_sign_off_by": approval.risk_sign_off_by,
+            "checklist_ready": report.ready,
+        }
+        if self._pool is not None and isinstance(self._audit_log, PostgresAuditLog):
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    approval, created = await self._persist_approval(
+                        approval, correlation_id, connection=conn
+                    )
+                    if not created:
+                        self._approval = approval
+                        return approval
+                    await self._audit_log.append(
+                        event_type="go_live.operator_approved",
+                        payload=payload,
+                        correlation_id=correlation_id,
+                        actor=operator,
+                        connection=conn,
+                    )
+        else:
+            approval, created = await self._persist_approval(approval, correlation_id)
+            if not created:
+                self._approval = approval
+                return approval
+            await self._audit_log.append(
+                event_type="go_live.operator_approved",
+                payload=payload,
+                correlation_id=correlation_id,
+                actor=operator,
+            )
         self._approval = approval
-
-        # ── Persist to Postgres ───────────────────────────────────────────────
-        await self._persist_approval(approval, correlation_id)
-
-        # ── Append to audit log ───────────────────────────────────────────────
-        await self._audit_log.append(
-            event_type="go_live.operator_approved",
-            payload={
-                "approval_id": approval.approval_id,
-                "operator": operator,
-                "comment": comment,
-                "rollback_plan_confirmed": rollback_plan_confirmed,
-                "risk_sign_off_by": approval.risk_sign_off_by,
-                "checklist_ready": report.ready,
-            },
-            correlation_id=correlation_id,
-            actor=operator,
-        )
+        self._risk_sign_off_by = effective_risk_sign_off
 
         log.info(
             "go_live_approval_recorded",
@@ -277,47 +317,84 @@ class GoLiveGate:
 
     # ── Persistence helpers ───────────────────────────────────────────────────
 
-    async def _persist_approval(self, approval: ApprovalEvent, correlation_id: str) -> None:
-        """Write approval to go_live_approvals table.  No-op if pool is None."""
+    async def _persist_approval(
+        self, approval: ApprovalEvent, correlation_id: str, *, connection: Any = None
+    ) -> tuple[ApprovalEvent, bool]:
+        """Persist once per correlation key, in the caller's transaction when supplied."""
         if self._pool is None:
             log.warning(
                 "go_live_approval_no_pool",
                 note="approval not persisted to DB — pool is None",
             )
-            return
+            return approval, True
 
         try:
-            async with self._pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO go_live_approvals
-                        (approval_id, operator, approved, comment, approved_at,
-                         rollback_plan_confirmed, risk_sign_off_by, checklist_snapshot,
-                         correlation_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                    ON CONFLICT (approval_id) DO NOTHING
-                    """,
-                    uuid.UUID(approval.approval_id),
-                    approval.operator,
-                    approval.approved,
-                    approval.comment,
-                    approval.approved_at,
-                    approval.rollback_plan_confirmed,
-                    approval.risk_sign_off_by,
-                    json.dumps(approval.checklist_snapshot),
-                    correlation_id,
-                )
+            from trading_bot.database.audit_log import PostgresAuditLog
+
+            async with PostgresAuditLog(self._pool)._connection(connection) as conn:
+                async with conn.transaction():
+                    await conn.execute("SELECT pg_advisory_xact_lock(724619831)")
+                    existing = await conn.fetchrow(
+                        """SELECT * FROM go_live_approvals WHERE correlation_id = $1
+                           ORDER BY approved_at DESC LIMIT 1""",
+                        correlation_id,
+                    )
+                    if existing is not None:
+                        if (
+                            existing["operator"] != approval.operator
+                            or existing["comment"] != approval.comment
+                            or existing["risk_sign_off_by"] != approval.risk_sign_off_by
+                            or existing["rollback_plan_confirmed"]
+                            != approval.rollback_plan_confirmed
+                        ):
+                            raise ValueError(
+                                "approval idempotency key reused for a different request"
+                            )
+                        snapshot = existing["checklist_snapshot"]
+                        return ApprovalEvent(
+                            approval_id=str(existing["approval_id"]),
+                            operator=existing["operator"],
+                            approved=existing["approved"],
+                            comment=existing["comment"],
+                            approved_at=existing["approved_at"],
+                            rollback_plan_confirmed=existing["rollback_plan_confirmed"],
+                            risk_sign_off_by=existing["risk_sign_off_by"],
+                            checklist_snapshot=json.loads(snapshot)
+                            if isinstance(snapshot, str)
+                            else dict(snapshot),
+                        ), False
+                    await conn.execute(
+                        """
+                        INSERT INTO go_live_approvals
+                            (approval_id, operator, approved, comment, approved_at,
+                             rollback_plan_confirmed, risk_sign_off_by, checklist_snapshot,
+                             correlation_id)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        ON CONFLICT (approval_id) DO NOTHING
+                        """,
+                        uuid.UUID(approval.approval_id),
+                        approval.operator,
+                        approval.approved,
+                        approval.comment,
+                        approval.approved_at,
+                        approval.rollback_plan_confirmed,
+                        approval.risk_sign_off_by,
+                        json.dumps(approval.checklist_snapshot),
+                        correlation_id,
+                    )
             log.info(
                 "go_live_approval_persisted",
                 approval_id=approval.approval_id,
                 operator=approval.operator,
             )
+            return approval, True
         except Exception as exc:
             log.error(
                 "go_live_approval_persist_failed",
                 approval_id=approval.approval_id,
                 error=str(exc),
             )
+            raise
 
     # ── Criterion evaluators ──────────────────────────────────────────────────
 
@@ -325,6 +402,7 @@ class GoLiveGate:
         criterion = CRITERIA_BY_ID[criterion_id]
 
         evaluator = {
+            "audit_chain_integrity": self._check_audit_chain,
             "dry_run_completed": self._check_dry_run,
             "paper_evidence_thresholds": self._check_paper_evidence,
             "paper_live_parity": self._check_paper_parity,
@@ -364,6 +442,11 @@ class GoLiveGate:
             f"need ≥7 paper trading days, have {self._paper_trading_days}",
         )
 
+    async def _check_audit_chain(self) -> tuple[CriterionStatus, str]:
+        if self._audit_chain_verified:
+            return CriterionStatus.PASS, "persisted audit chain verified"
+        return CriterionStatus.FAIL, "audit chain is unverified or has integrity violations"
+
     async def _check_paper_evidence(self) -> tuple[CriterionStatus, str]:
         days_ok = self._paper_trading_days >= self._min_paper_days
         trips_ok = self._paper_round_trips >= self._min_round_trips
@@ -389,6 +472,15 @@ class GoLiveGate:
             return CriterionStatus.FAIL, "paper or backtest win_rate not provided"
         if self._paper_drawdown_pct is None or self._backtest_drawdown_pct is None:
             return CriterionStatus.FAIL, "paper or backtest drawdown_pct not provided"
+
+        values = (
+            self._paper_win_rate,
+            self._backtest_win_rate,
+            self._paper_drawdown_pct,
+            self._backtest_drawdown_pct,
+        )
+        if not all(math.isfinite(v) and 0 <= v <= 1 for v in values):
+            return CriterionStatus.FAIL, "parity metrics must be finite fractions in [0, 1]"
 
         win_rate_ok = self._paper_win_rate >= self._backtest_win_rate * 0.80
         dd_ok = self._paper_drawdown_pct <= self._backtest_drawdown_pct * 1.20
@@ -425,7 +517,7 @@ class GoLiveGate:
         return CriterionStatus.FAIL, "rollback runbook not confirmed"
 
     async def _check_operator_approval(self) -> tuple[CriterionStatus, str]:
-        if self._approval and self._approval.approved:
+        if self._approval and self._approval.approved and self._approval.is_current:
             return (
                 CriterionStatus.PASS,
                 f"approved by '{self._approval.operator}' "
@@ -436,38 +528,39 @@ class GoLiveGate:
     async def _check_exchange_permissions(self) -> tuple[CriterionStatus, str]:
         try:
             # Probe read permission
-            await self._exchange.health_check()
+            if not await self._exchange.health_check():
+                return CriterionStatus.FAIL, "exchange health check returned false"
             # Probe trade permission via a balance fetch
             await self._exchange.fetch_balances()
         except Exception as exc:
             return CriterionStatus.FAIL, f"exchange health/permission check failed: {exc}"
 
-        # We cannot programmatically verify withdraw permission is absent here
-        # (Binance does not expose this via public API). Flag as warning.
-        return (
-            CriterionStatus.WARNING,
-            "read+trade permissions confirmed reachable; "
-            "manually verify withdraw permission is ABSENT on the API key",
-        )
+        if not self._exchange_permissions_verified:
+            return CriterionStatus.FAIL, (
+                "a balance read cannot prove trade permission or disabled withdrawals; "
+                "a documented permissions audit of the intended live key is required"
+            )
+        return CriterionStatus.PASS, "exchange permissions audit confirmed"
 
     async def _check_feature_flags(self) -> tuple[CriterionStatus, str]:
         if self._feature_flags is None:
-            return CriterionStatus.WARNING, "feature flag store not connected — cannot verify"
+            return CriterionStatus.FAIL, "feature flag store not connected — cannot verify"
 
         paper_ok = await self._feature_flags.is_enabled("paper_trading_enabled")
         ws_ok = await self._feature_flags.is_enabled("websocket_enabled")
-        live_disabled = not await self._feature_flags.is_enabled("live_trading_enabled")
+        live_enabled = await self._feature_flags.is_enabled("live_trading_enabled")
+        live_matches = live_enabled == self._live_execution_requested
 
-        if paper_ok and ws_ok and live_disabled:
-            return CriterionStatus.PASS, "paper=true, websocket=true, live=false"
+        if paper_ok and ws_ok and live_matches:
+            return CriterionStatus.PASS, f"paper=true, websocket=true, live={live_enabled}"
 
         issues = []
         if not paper_ok:
             issues.append("paper_trading_enabled is false")
         if not ws_ok:
             issues.append("websocket_enabled is false")
-        if not live_disabled:
-            issues.append("live_trading_enabled is already true — unexpected")
+        if not live_matches:
+            issues.append("live_trading_enabled does not match the requested operation")
         return CriterionStatus.FAIL, "; ".join(issues)
 
     async def _check_circuit_breakers(self) -> tuple[CriterionStatus, str]:

@@ -13,6 +13,8 @@ on missing data.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 from trading_bot.go_live.gate import GoLiveGate
@@ -24,7 +26,7 @@ MIN_PAPER_DAYS = 30
 MIN_ROUND_TRIPS = 100
 
 # Expected rollback runbook (Gate 0 requires a documented rollback plan).
-_ROLLBACK_RUNBOOK = Path("trading_bot/docs/runbooks/deployment-rollback.md")
+_ROLLBACK_RUNBOOK = Path(__file__).resolve().parents[1] / "docs/runbooks/deployment-rollback.md"
 
 
 def _rollback_runbook_exists() -> bool:
@@ -41,21 +43,28 @@ async def _paper_backtest_means(
     """Return (paper_win, paper_dd, backtest_win, backtest_dd) means across strategies."""
     from trading_bot.backtesting.runner import get_latest_backtest
     from trading_bot.promotion.pipeline import collect_strategy_metrics
-    from trading_bot.strategies.registry import get_strategy_registry
 
     paper_wins: list[float] = []
     paper_dds: list[float] = []
-    for entry in get_strategy_registry().all_entries():
-        metrics = await collect_strategy_metrics(entry.strategy_id, pool)
+    backtests = get_latest_backtest()
+    if not backtests:
+        return None, None, None, None
+    for strategy_id in {bt.strategy_id for bt in backtests}:
+        metrics = await collect_strategy_metrics(strategy_id, pool)
+        if metrics is None or not metrics.evidence_complete:
+            return None, None, None, None
         if metrics is not None:
             paper_wins.append(metrics.win_rate)
             paper_dds.append(metrics.max_drawdown_pct)
 
     bt_wins: list[float] = []
     bt_dds: list[float] = []
-    for bt in get_latest_backtest():
-        bt_wins.append(bt.metrics.win_rate)
-        bt_dds.append(bt.metrics.max_drawdown_pct)
+    for bt in backtests:
+        if bt.metrics.total_trades <= 0:
+            return None, None, None, None
+        # Backtest metrics are percentages; promotion metrics are fractions.
+        bt_wins.append(bt.metrics.win_rate / 100.0)
+        bt_dds.append(abs(bt.metrics.max_drawdown_pct) / 100.0)
 
     return _mean(paper_wins), _mean(paper_dds), _mean(bt_wins), _mean(bt_dds)
 
@@ -76,23 +85,36 @@ async def _evidence_paper_stats(pool: object) -> tuple[int, int]:
     return len(daily), round_trips
 
 
-async def build_go_live_gate(pool: object) -> GoLiveGate:
+async def build_go_live_gate(pool: object, *, for_execution: bool = False) -> GoLiveGate:
     """Build a GoLiveGate with all params sourced from live evidence + state."""
     from trading_bot.database.audit_log import PostgresAuditLog
     from trading_bot.execution.paper import PaperExchange
     from trading_bot.feature_flags.store import get_default_store
     from trading_bot.oms.reconciler import ReconciliationSeverity, get_reconciler
 
-    paper_days, round_trips = await _evidence_paper_stats(pool)
+    try:
+        paper_days, round_trips = await _evidence_paper_stats(pool)
+    except Exception:
+        paper_days, round_trips = 0, 0
 
     reconciler = get_reconciler()
     recon_clean = (
         reconciler is not None
         and reconciler.last_report is not None
         and reconciler.last_report.severity == ReconciliationSeverity.OK
+        and not reconciler.orders_blocked
+        and 0 <= (datetime.now(UTC) - reconciler.last_report.run_at).total_seconds() <= 300
     )
 
-    paper_win, paper_dd, bt_win, bt_dd = await _paper_backtest_means(pool)
+    try:
+        paper_win, paper_dd, bt_win, bt_dd = await _paper_backtest_means(pool)
+    except Exception:
+        paper_win, paper_dd, bt_win, bt_dd = None, None, None, None
+
+    try:
+        chain_ok = await asyncio.wait_for(PostgresAuditLog(pool).verify_chain(), timeout=10)
+    except Exception:
+        chain_ok = False
 
     gate = GoLiveGate(
         audit_log=PostgresAuditLog(pool),
@@ -109,6 +131,8 @@ async def build_go_live_gate(pool: object) -> GoLiveGate:
         backtest_win_rate=bt_win,
         backtest_drawdown_pct=bt_dd,
         rollback_runbook_exists=_rollback_runbook_exists(),
+        audit_chain_verified=chain_ok,
+        live_execution_requested=for_execution,
     )
     await gate.load_latest_approval()
     log.info(

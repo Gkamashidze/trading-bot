@@ -59,9 +59,22 @@ class MicroLiveConfig:
 
     # Hard upper bounds — code will refuse to start if config exceeds these
     _ABSOLUTE_MAX_ORDER_USD: Decimal = field(default=Decimal("50"), init=False, repr=False)
-    _ABSOLUTE_MAX_DAILY_LOSS_USD: Decimal = field(default=Decimal("100"), init=False, repr=False)
+    _ABSOLUTE_MAX_DAILY_LOSS_USD: Decimal = field(default=Decimal("25"), init=False, repr=False)
 
     def __post_init__(self) -> None:
+        for name, value, maximum in (
+            ("max_order_usd", self.max_order_usd, Decimal("50")),
+            ("max_daily_loss_usd", self.max_daily_loss_usd, Decimal("25")),
+            ("max_weekly_loss_usd", self.max_weekly_loss_usd, Decimal("75")),
+        ):
+            if not value.is_finite() or not 0 < value <= maximum:
+                raise ValueError(f"{name} must be positive and within hard limit {maximum}")
+        if self.max_open_positions != 1 or not 0 < self.session_window_hours <= 4:
+            raise ValueError(
+                "micro-live requires one position and a session no longer than 4 hours"
+            )
+        if not self.require_daily_operator_approval or not self.require_clean_reconciliation:
+            raise ValueError("operator approval and reconciliation cannot be disabled")
         if self.max_order_usd > self._ABSOLUTE_MAX_ORDER_USD:
             raise ValueError(
                 f"max_order_usd={self.max_order_usd} exceeds hard limit "
@@ -146,6 +159,11 @@ class MicroLiveGate:
                 False,
                 "micro-live is globally disabled — system not yet cleared for live trading",
             )
+
+        if not order_notional_usd.is_finite() or order_notional_usd <= 0:
+            return False, "order notional must be finite and positive"
+        if strategy_id != self._session.strategy_id or symbol != self._session.symbol:
+            return False, "order does not match the approved session strategy and symbol"
 
         if not self._session.is_active:
             return False, f"micro-live session not active (status={self._session.status})"

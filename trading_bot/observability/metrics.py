@@ -80,6 +80,12 @@ STRATEGY_PNL = Gauge(
     labelnames=["strategy"],
 )
 
+STRATEGY_EQUITY_VERIFIED = Gauge(
+    "trading_strategy_equity_verified",
+    "1 when a strategy has complete, fee-inclusive marked equity evidence, otherwise 0",
+    labelnames=["strategy"],
+)
+
 EXCHANGE_RATE_LIMIT_WEIGHT = Gauge(
     "trading_exchange_rate_limit_weight",
     "Most recent X-MBX-USED-WEIGHT-1M (or equivalent) value reported by the exchange",

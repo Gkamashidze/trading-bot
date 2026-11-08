@@ -72,7 +72,9 @@ class PaperExchange(ExchangeInterface):
                 f"Paper fill rejected for {req.symbol}: {result.reject_reason}"
             )
 
-        fill_price = Decimal(str(result.net_fill_price))
+        # Execution price contains spread/impact. Fees are a separate cash flow;
+        # returning the fee-adjusted price would charge them again in the ledger.
+        fill_price = Decimal(str(result.gross_fill_price))
         filled_qty = Decimal(str(result.filled_quantity))
         status = "partially_filled" if result.is_partial else "filled"
 
@@ -83,7 +85,8 @@ class PaperExchange(ExchangeInterface):
             requested_quantity=str(req.quantity),
             filled_quantity=str(filled_qty),
             gross_price=str(result.gross_fill_price),
-            net_fill_price=str(fill_price),
+            fill_price=str(fill_price),
+            net_fill_price=str(result.net_fill_price),
             fee_paid=str(result.fee_paid),
             slippage_cost=str(result.slippage_cost),
             latency_ms=result.latency_ms,

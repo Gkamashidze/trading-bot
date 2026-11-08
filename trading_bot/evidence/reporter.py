@@ -137,7 +137,7 @@ class EvidenceReporter:
         self,
         session_id: uuid.UUID,
         min_days: int = 30,
-        min_trades: int = 20,
+        min_trades: int = 100,
         max_drawdown_threshold: float = 0.20,
         max_rejected_rate: float = 0.10,
         min_parity_score: float = 0.70,
@@ -153,7 +153,8 @@ class EvidenceReporter:
 
         # ── Core metrics ──────────────────────────────────────────────
         days_observed = len(daily_rows)
-        trade_count = int(session_report.get("trade_count", 0))
+        trade_count = int(session_report.get("round_trip_count", 0))
+        min_days, min_trades = max(30, min_days), max(100, min_trades)
         rejected_order_count = sum(r["rejected_order_count"] for r in daily_rows)
         partial_fill_count = sum(r["partial_fill_count"] for r in daily_rows)
         recon_critical = int(session_report.get("reconciliation_critical_count", 0))
@@ -196,9 +197,17 @@ class EvidenceReporter:
 
         # ── Evidence gap check ────────────────────────────────────────
         evidence_gap_ok = await self._check_evidence_gap(session_id, max_evidence_gap_hours)
+        marked_evidence_ok = await self._verified_strategy_evidence(min_days)
 
         # ── Acceptance criteria ───────────────────────────────────────
         checks: list[MicroLiveReadinessCheck] = [
+            MicroLiveReadinessCheck(
+                criterion="verified_marked_strategy_evidence",
+                passed=marked_evidence_ok,
+                actual_value="verified" if marked_evidence_ok else "incomplete",
+                threshold=f">= {min_days} observed marked days for active strategies",
+                detail="Legacy fill-price estimates cannot substitute for marked equity history",
+            ),
             MicroLiveReadinessCheck(
                 criterion="minimum_days_observed",
                 passed=days_observed >= min_days,
@@ -246,16 +255,15 @@ class EvidenceReporter:
             ),
         ]
 
-        if parity_score is not None:
-            checks.append(
-                MicroLiveReadinessCheck(
-                    criterion="paper_backtest_parity_score",
-                    passed=float(parity_score) >= min_parity_score,
-                    actual_value=f"{float(parity_score):.2f}",
-                    threshold=f">= {min_parity_score:.2f}",
-                    detail="paper↔backtest parity (win_rate + drawdown), computed weekly",
-                )
+        checks.append(
+            MicroLiveReadinessCheck(
+                criterion="paper_backtest_parity_score",
+                passed=parity_score is not None and float(parity_score) >= min_parity_score,
+                actual_value=str(parity_score) if parity_score is not None else "unavailable",
+                threshold=f">= {min_parity_score:.2f}",
+                detail="paper↔backtest parity (win_rate + drawdown), computed weekly",
             )
+        )
 
         # ── Recommendation ────────────────────────────────────────────
         blocking_fails = [
@@ -265,6 +273,7 @@ class EvidenceReporter:
             and c.criterion
             in {
                 "minimum_days_observed",
+                "verified_marked_strategy_evidence",
                 "zero_unresolved_critical_reconciliation",
                 "zero_unresolved_critical_alerts",
                 "no_evidence_gap",
@@ -331,6 +340,18 @@ class EvidenceReporter:
             recommendation_rationale=rationale,
         )
 
+    async def _verified_strategy_evidence(self, min_days: int) -> bool:
+        from trading_bot.promotion.pipeline import collect_strategy_metrics, get_all_promotions
+
+        strategies = get_all_promotions()
+        if not strategies:
+            return False
+        for strategy in strategies:
+            metrics = await collect_strategy_metrics(strategy.strategy_id, self._store._pool)
+            if metrics is None or not metrics.evidence_complete or metrics.days_running < min_days:
+                return False
+        return True
+
     async def _fetch_tca_averages(self, session_id: uuid.UUID) -> tuple[Decimal, Decimal]:
         """Return (avg_slippage_pct, avg_latency_ms) from TCA records."""
         try:
@@ -367,11 +388,15 @@ class EvidenceReporter:
                     session_id,
                 )
             if len(rows) < 2:
-                return True
+                return False
+            age = (datetime.now(UTC) - rows[-1]["captured_at"]).total_seconds()
+            if age < 0 or age > max_gap_hours * 3600:
+                return False
             for i in range(1, len(rows)):
                 gap = rows[i]["captured_at"] - rows[i - 1]["captured_at"]
                 if gap.total_seconds() > max_gap_hours * 3600:
                     return False
+            return True
         except Exception as exc:
             log.warning("evidence_gap_check_failed", error=str(exc))
-        return True
+        return False

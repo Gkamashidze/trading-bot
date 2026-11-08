@@ -75,7 +75,18 @@ class PromotionStage(StrEnum):
 # ---------------------------------------------------------------------------
 
 
-class _BaseDTO(BaseModel):
+class _UTCModel(BaseModel):
+    @field_validator("*", mode="after")
+    @classmethod
+    def normalize_datetimes(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("datetime must be UTC-aware; naive datetimes are rejected")
+            return value.astimezone(UTC)
+        return value
+
+
+class _BaseDTO(_UTCModel):
     """Shared config for all DTOs: immutable, no extra fields."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", use_enum_values=True)
@@ -86,7 +97,7 @@ class _BaseDTO(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class OHLCVBar(BaseModel):
+class OHLCVBar(_UTCModel):
     """A single OHLCV candle.
 
     Timestamps must be UTC-aware. Prices and volumes use Decimal for exact
@@ -143,7 +154,7 @@ class OHLCVBar(BaseModel):
         return self
 
 
-class Ticker(BaseModel):
+class Ticker(_UTCModel):
     """Real-time best bid/ask snapshot."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -177,7 +188,7 @@ class Ticker(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class OrderRequest(BaseModel):
+class OrderRequest(_UTCModel):
     """A request to submit an order — not yet submitted to an exchange."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -197,16 +208,19 @@ class OrderRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_limit_order(self) -> OrderRequest:
+        if not self.quantity.is_finite() or self.quantity <= 0:
+            raise ValueError("quantity must be positive and finite")
+        for price in (self.limit_price, self.stop_price):
+            if price is not None and (not price.is_finite() or price <= 0):
+                raise ValueError("order prices must be finite and positive")
         if self.order_type == OrderType.LIMIT and self.limit_price is None:
             raise ValueError("LIMIT order requires limit_price")
         if self.order_type == OrderType.STOP and self.stop_price is None:
             raise ValueError("STOP order requires stop_price")
-        if self.quantity <= 0:
-            raise ValueError(f"quantity must be positive, got {self.quantity}")
         return self
 
 
-class OrderState(BaseModel):
+class OrderState(_UTCModel):
     """The lifecycle state of an order tracked by the OMS."""
 
     model_config = ConfigDict(frozen=False, extra="forbid")  # mutable for state transitions
@@ -234,7 +248,7 @@ class OrderState(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class Position(BaseModel):
+class Position(_UTCModel):
     """A current open position in the portfolio."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -263,7 +277,7 @@ class Position(BaseModel):
         return (self.current_price - self.average_cost) / self.average_cost
 
 
-class PortfolioSnapshot(BaseModel):
+class PortfolioSnapshot(_UTCModel):
     """Point-in-time snapshot of the entire portfolio state."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -289,7 +303,7 @@ class PortfolioSnapshot(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class Signal(BaseModel):
+class Signal(_UTCModel):
     """A trading signal emitted by a strategy."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -313,7 +327,7 @@ class Signal(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class DataLineage(BaseModel):
+class DataLineage(_UTCModel):
     """Lineage metadata attached to every processed dataset.
 
     All fields are optional-with-defaults so existing callers that pass only
@@ -347,7 +361,7 @@ class DataLineage(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class PriceTick(BaseModel):
+class PriceTick(_UTCModel):
     """One real-time price update from the Binance 24hr miniTicker WebSocket stream."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")

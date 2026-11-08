@@ -591,12 +591,21 @@ async def evidence_portfolio_snapshot_job() -> None:
     idem_key = f"portfolio_snapshot:{hashlib.sha256(raw.encode()).hexdigest()[:16]}"
 
     positions_map = {pos.symbol: pos.quantity for pos in pf_snap.positions}
+    from trading_bot.evidence.performance import STRATEGY_EQUITY_KEY, capture_strategy_equity
+
+    positions_payload: dict[str, Any] = {sym: str(qty) for sym, qty in positions_map.items()}
+    from trading_bot.feature_flags import is_enabled
+
+    if await is_enabled("strategy_marked_evidence_enabled"):
+        positions_payload[STRATEGY_EQUITY_KEY] = await capture_strategy_equity(
+            ev_store._pool, session_id
+        )
     snapshot = PortfolioEvidenceSnapshot(
         session_id=session_id,
         captured_at=now,
         total_equity=pf_snap.total_equity,
         cash_balance=pf_snap.cash_balance,
-        positions={sym: Decimal(str(qty)) for sym, qty in positions_map.items()},
+        positions=positions_payload,
         unrealized_pnl=Decimal("0"),
         daily_pnl=pf_snap.daily_pnl,
         daily_drawdown_pct=pf_snap.daily_drawdown_pct,

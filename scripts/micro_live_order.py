@@ -62,6 +62,7 @@ async def _run(args: argparse.Namespace) -> int:
             side=args.side,
             usd_notional=args.usd,
             operator=args.operator,
+            idempotency_key=args.idempotency_key,
         )
         print(f"✅ order filled: {fill}")
         return 0
@@ -78,6 +79,7 @@ def main() -> None:
     parser.add_argument("--usd", required=True, type=float, help="Order notional in USD (≤ $50).")
     parser.add_argument("--symbol", default="BTC/USDT")
     parser.add_argument("--operator", required=True, help="Operator name for the audit trail.")
+    parser.add_argument("--idempotency-key", required=True, help="Reuse this key for every retry.")
     parser.add_argument("--strategy", default="operator")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     args = parser.parse_args()

@@ -58,7 +58,7 @@ async def compute_parity_score(pool: object) -> Decimal | None:
     by_strategy: dict[str, list[tuple[float, float]]] = {}
     for bt in backtests:
         by_strategy.setdefault(bt.strategy_id, []).append(
-            (bt.metrics.win_rate, _norm_drawdown(bt.metrics.max_drawdown_pct))
+            (bt.metrics.win_rate / 100.0, abs(bt.metrics.max_drawdown_pct) / 100.0)
         )
 
     scorer = ParityScorer(_PARITY_CONFIG)
@@ -67,8 +67,8 @@ async def compute_parity_score(pool: object) -> Decimal | None:
 
     for strategy_id, metric_pairs in by_strategy.items():
         paper = await collect_strategy_metrics(strategy_id, pool)
-        if paper is None:  # < 5 paper trades — skip
-            continue
+        if paper is None or not paper.evidence_complete:
+            return None
 
         bt_win = _mean([w for w, _ in metric_pairs])
         bt_dd = _mean([d for _, d in metric_pairs])

@@ -67,11 +67,16 @@
   {% if r.metrics is none %}
   <div class="text-xs text-gray-500 italic py-2">
     {% if r.gate %}
-    მონაცემები ჯერ არ დაგროვდა (საჭიროა ≥5 ვაჭრობა). მონაცემთა შეგროვება მიმდინარეობს...
+    სანდო მონაცემები ჯერ არ დაგროვდა. მონაცემთა შეგროვება მიმდინარეობს...
     {% else %}
     უმაღლეს tier-ზეა — შემდგომი გადასვლა არ არსებობს.
     {% endif %}
   </div>
+  {% elif not r.metrics.evidence_complete %}
+  <p class="text-xs text-yellow-400">საჭიროა სრული, ფასებით შეფასებული ისტორია:</p>
+  <ul class="text-xs text-gray-400">
+    {% for error in r.metrics.evidence_errors %}<li>{{ error }}</li>{% endfor %}
+  </ul>
   {% elif r.gate %}
 
   {% set m = r.metrics %}
@@ -113,7 +118,7 @@
   <div class="border-t border-gray-700 pt-2">
     {% if all_ok %}
       <p class="text-xs text-green-400 font-semibold">
-        🎯 ყველა გეიტი დაკმაყოფილებულია — ოპერატორის დასტური მზადაა micro-live-ისთვის
+        სტრატეგიის მეტრიკები აკმაყოფილებს ზღვრებს — საერთო Go-Live ანგარიში ცალკე უნდა გაიაროს
       </p>
     {% else %}
       {% set remaining = [] %}

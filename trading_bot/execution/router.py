@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from trading_bot.core.models import (
@@ -190,6 +190,18 @@ async def route_signal(result: StrategyResult) -> None:
     tracker = get_order_tracker()
     snapshot = portfolio.get_snapshot()
 
+    # A symbol has one inventory owner in this portfolio model. Another
+    # strategy may not add to it or liquidate it and claim the resulting PnL.
+    owned_position = next((p for p in snapshot.positions if p.symbol == result.symbol), None)
+    if owned_position is not None and owned_position.strategy_id != result.strategy_id:
+        log.warning(
+            "router_position_owner_mismatch",
+            symbol=result.symbol,
+            owner=owned_position.strategy_id,
+            strategy=result.strategy_id,
+        )
+        return
+
     # ── Resolve current price from WebSocket ─────────────────────────────────
     from trading_bot.websocket.price_cache import get_price_cache
 
@@ -205,6 +217,10 @@ async def route_signal(result: StrategyResult) -> None:
         return
 
     fill_price = tick.price
+    age_seconds = (datetime.now(UTC) - tick.timestamp).total_seconds()
+    if age_seconds < -5 or age_seconds > 30 or not fill_price.is_finite() or fill_price <= 0:
+        log.warning("router_invalid_or_stale_price", symbol=ws_symbol, age_seconds=age_seconds)
+        return
     side = OrderSide.BUY if result.signal == "BUY" else OrderSide.SELL
 
     # ── Position sizing ──────────────────────────────────────────────────────
@@ -213,7 +229,7 @@ async def route_signal(result: StrategyResult) -> None:
         if invest < _MIN_ORDER_VALUE:
             log.debug("router_skip_small_order", invest=str(invest), strategy=result.strategy_id)
             return
-        quantity = (invest / fill_price).quantize(Decimal("0.000001"))
+        quantity = (invest / fill_price).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
     else:
         pos = next((p for p in snapshot.positions if p.symbol == result.symbol), None)
         if pos is None:
@@ -249,7 +265,10 @@ async def route_signal(result: StrategyResult) -> None:
     )
 
     # ── Risk check ───────────────────────────────────────────────────────────
-    decision = _risk.pre_trade_check(order, snapshot, fill_price)
+    from trading_bot.state.risk_state import get_risk_state_store
+
+    safety_state = await get_risk_state_store().get_snapshot()
+    decision = _risk.pre_trade_check(order, snapshot, fill_price, risk_state=safety_state)
     if not decision.approved:
         log.warning(
             "router_risk_rejected",
@@ -294,7 +313,12 @@ async def route_signal(result: StrategyResult) -> None:
         fill_resp = await _exchange.place_order(order)
         actual_price = Decimal(fill_resp["fill_price"])
         actual_filled_qty = Decimal(str(fill_resp.get("filled_quantity", order.quantity)))
-        portfolio.apply_fill(order, actual_price, filled_quantity=actual_filled_qty)
+        fee_usdt = Decimal(
+            str(fill_resp.get("fee_paid", actual_filled_qty * actual_price * Decimal("0.001")))
+        )
+        portfolio.apply_fill(
+            order, actual_price, filled_quantity=actual_filled_qty, fee_paid=fee_usdt
+        )
         order_status = (
             OrderStatus.PARTIALLY_FILLED
             if fill_resp.get("status") == OrderStatus.PARTIALLY_FILLED.value
@@ -339,7 +363,6 @@ async def route_signal(result: StrategyResult) -> None:
         # ── Accounting: record trade lot + FIFO PnL ───────────────────────
         from trading_bot.accounting.ledger import get_accounting_ledger
 
-        fee_usdt = float(actual_filled_qty) * float(actual_price) * 0.001  # taker 0.1%
         ledger = get_accounting_ledger()
         lot = ledger.record_trade(
             symbol=order.symbol,

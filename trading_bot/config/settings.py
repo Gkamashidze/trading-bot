@@ -66,7 +66,7 @@ class LoggingSettings(BaseSettings):
 class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    url: str = Field(default="", alias="DATABASE_URL")
+    url: str = Field(default="", alias="DATABASE_URL", repr=False)
     pool_min: int = 5
     pool_max: int = 20
     command_timeout: int = 30
@@ -127,8 +127,8 @@ class LatencyBudgetsSettings(BaseSettings):
 class BinanceExchangeSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    api_key: str = Field(default="", alias="BINANCE_API_KEY")
-    api_secret: str = Field(default="", alias="BINANCE_API_SECRET")
+    api_key: str = Field(default="", alias="BINANCE_API_KEY", repr=False)
+    api_secret: str = Field(default="", alias="BINANCE_API_SECRET", repr=False)
     testnet: bool = Field(default=True, alias="BINANCE_TESTNET")
     base_url: str = "https://api.binance.com"
     testnet_url: str = "https://testnet.binance.vision"
@@ -164,8 +164,8 @@ class AlpacaExchangeSettings(BaseSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    api_key: str = Field(default="", alias="ALPACA_API_KEY")
-    secret_key: str = Field(default="", alias="ALPACA_SECRET_KEY")
+    api_key: str = Field(default="", alias="ALPACA_API_KEY", repr=False)
+    secret_key: str = Field(default="", alias="ALPACA_SECRET_KEY", repr=False)
     base_url: str = "https://paper-api.alpaca.markets"
     paper: bool = True
     allow_live_trading: bool = Field(default=False, alias="ALLOW_LIVE_TRADING")
@@ -178,7 +178,7 @@ class AlpacaExchangeSettings(BaseSettings):
 class TelegramSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN", repr=False)
     alert_chat_id: str = Field(default="", alias="TELEGRAM_ALERT_CHAT_ID")
 
 
@@ -207,7 +207,7 @@ class MarketContextSettings(BaseSettings):
 
     enabled: bool = True
     refresh_interval_minutes: int = 60
-    fred_api_key: str = Field(default="", alias="FRED_API_KEY")
+    fred_api_key: str = Field(default="", alias="FRED_API_KEY", repr=False)
 
 
 class TradingCryptoSettings(BaseSettings):
@@ -240,7 +240,7 @@ class EvidenceSettings(BaseSettings):
 
     enabled: bool = True
     min_days: int = 30
-    min_trades: int = 20
+    min_trades: int = 100
     max_drawdown_pct: float = 0.20
     max_rejected_rate: float = 0.10
     min_parity_score: float = 0.70
@@ -268,7 +268,7 @@ class Settings(BaseSettings):
 
     # Top-level scalars
     environment: Literal["development", "staging", "production"] = "development"
-    secret_key: str = Field(default="", alias="SECRET_KEY")
+    secret_key: str = Field(default="", alias="SECRET_KEY", repr=False)
     config_version: str = "1.0.0"
 
     # Nested sub-configs — populated from YAML defaults + env overrides
@@ -317,13 +317,15 @@ class Settings(BaseSettings):
         """
         raw = self.model_dump()
         # Redact secret fields
-        _redact_keys = {"secret_key", "api_key", "api_secret", "bot_token", "url"}
+        _redact_keys = {"secret_key", "api_key", "api_secret", "bot_token", "url", "fred_api_key"}
 
         def _redact(obj: Any) -> Any:
             if isinstance(obj, dict):
                 return {
                     k: "[REDACTED]" if k in _redact_keys else _redact(v) for k, v in obj.items()
                 }
+            if isinstance(obj, list):
+                return [_redact(item) for item in obj]
             return obj
 
         return cast(dict[str, Any], _redact(raw))

@@ -21,8 +21,8 @@ from trading_bot.promotion.pipeline import StrategyMetrics
 def _backtest(strategy_id: str, win_rate: float, max_dd: float) -> MagicMock:
     bt = MagicMock()
     bt.strategy_id = strategy_id
-    bt.metrics.win_rate = win_rate
-    bt.metrics.max_drawdown_pct = max_dd
+    bt.metrics.win_rate = win_rate * 100.0
+    bt.metrics.max_drawdown_pct = max_dd * 100.0
     return bt
 
 
@@ -99,7 +99,7 @@ class TestComputeParityScore:
             patch.object(
                 evidence_parity,
                 "get_latest_backtest",
-                return_value=[_backtest("sma", 0.5, 5.0)],
+                return_value=[_backtest("sma", 0.5, 0.05)],
             ),
             patch.object(
                 evidence_parity,
