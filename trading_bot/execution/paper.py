@@ -7,7 +7,8 @@ impact, partial fills, latency, and stale quote rejection.
 Set fill_model_profile=FillModelProfile.IDEAL to restore legacy instant-fill
 behavior (useful for debugging strategy logic in isolation).
 
-State is in-memory and resets on restart.
+Each simulation settles immediately. Partial fills do not retain or queue an
+unfilled remainder; the OMS preserves their partial status for fill accounting.
 """
 
 from __future__ import annotations

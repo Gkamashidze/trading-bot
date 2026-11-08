@@ -23,6 +23,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Restore rejected orders with legacy NULL fill quantities as unfilled orders,
+  persist zero quantities as exact decimals, and preserve order timestamps.
+  Reconcile settled paper partial fills without treating their unqueued remainder
+  as a live venue order. Incomplete OMS restoration now blocks new orders.
+
 - Apply fresh WebSocket marks to open portfolio positions, measure drawdown from
   the day's equity high-water mark without treating gains as losses, preserve
   exact cash and daily risk baselines across recovery, and serialize concurrent

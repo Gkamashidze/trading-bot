@@ -11,9 +11,9 @@ Real-money trading remains disabled. No real-money order was used as a test.
 | Python | 3.12.13, matching the production/CI minor version |
 | Ruff format and lint | Passed |
 | mypy | Passed, 165 application source files |
-| Required unit/property/replay tests | 1041 passed, including marked-portfolio risk, exact recovery and schedule freshness |
-| Coverage of configured unit-test scope | 74.95%, above the 50% required threshold |
-| PostgreSQL integration tests | 8 passed on an isolated PostgreSQL 18 database |
+| Required unit/property/replay tests | 1046 passed, including marked-portfolio risk, exact recovery and order restoration |
+| Coverage of configured unit-test scope | 74.99%, above the 50% required threshold |
+| PostgreSQL integration tests | 9 passed on an isolated PostgreSQL 18 database |
 | Chaos/contract test selection | 16 passed |
 | Credentialed Alpaca paper execution tests | 7 skipped; no broker orders were sent |
 | Dependency vulnerability audit | No known vulnerabilities in the pinned third-party set |
@@ -56,19 +56,34 @@ daily high-water marks, exact snapshot recovery and a damaged newest snapshot.
 
 ## Remaining requirements before real money
 
-1. Revoke the previously exposed Telegram credential and replace it after log
-   redaction is deployed. Confirm successful polling without credential leakage.
-2. Accumulate the real minimum evidence: 30 observed marked days, the system's
+1. Accumulate the real minimum evidence: 30 observed marked days, the system's
    100 completed round trips, and the candidate strategy's own quality gates.
    Existing unmarked history cannot stand in for missing observations.
-3. Validate paper/backtest parity for the same candidate, asset scope and period.
+2. Validate paper/backtest parity for the same candidate, asset scope and period.
    Baseline SMA/RSI results do not demonstrate a profitable trading edge.
-4. Investigate any historical audit violation reported by the deployed gate.
+3. Investigate any historical audit violation reported by the deployed gate.
    Historical events must not be silently rewritten or the criterion bypassed.
-5. Audit the intended live API key's permissions and restrictions, rehearse
+4. Audit the intended live API key's permissions and restrictions, rehearse
    venue-specific reconciliation, rollback and position closing, then obtain a
    current named risk review and explicit operator approval.
 
 These requirements remain blocking. Passing engineering tests, deploying main,
 or the mere passage of calendar time does not satisfy them. This record does not
 claim a credentialed broker execution test or an external penetration test.
+
+## Production observations
+
+- PRs 18 and 19 deployed successfully to Railway. The internal authenticated
+  verifier passed all 11 route checks; anonymous private-route requests returned
+  401, and health/readiness probes returned 200. WebSocket feeds connected.
+- The operator confirmed revoking the exposed Telegram token and saving its
+  replacement in Railway. Production registered all 14 commands successfully;
+  the inspected runtime logs contained no raw Telegram credential patterns.
+- The production audit chain verified successfully. Real-money gates stayed off.
+- A restart exposed legacy NULL fill quantities and settled paper partial fills
+  incorrectly classified as open orders. This follow-up preserves historical
+  statuses, restores unfilled quantities as zero, and blocks incomplete restores.
+- Railway reports one unresolved Postgres platform warning without exposing its
+  text through the connected API. The database is online, without recent failed
+  deployments; resource usage is low. The warning's cause remains unverified and
+  must be reviewed in the Railway console before a real-money launch.

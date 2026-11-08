@@ -5,6 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from trading_bot.core.models import (
     ExchangeId,
     OrderSide,
@@ -73,6 +75,38 @@ class TestOrderTrackerRecord:
 
 
 class TestOrderTrackerLoadRecent:
+    @pytest.mark.parametrize("filled_qty", [None, Decimal("0")])
+    async def test_rejected_order_with_no_fill_survives_restart(self, filled_qty) -> None:
+        from datetime import UTC, datetime
+
+        created = datetime(2026, 1, 1, tzinfo=UTC)
+        pool = _make_pool()
+        conn = pool.acquire.return_value.__aenter__.return_value
+        conn.fetch.return_value = [
+            {
+                "order_id": "rejected",
+                "strategy_id": "sma_crossover",
+                "symbol": "BTC/USDT",
+                "exchange": "binance",
+                "side": "buy",
+                "order_type": "market",
+                "requested_qty": Decimal("0"),
+                "filled_qty": filled_qty,
+                "fill_price": None,
+                "status": "rejected",
+                "reject_reason": "risk",
+                "created_at": created,
+            }
+        ]
+        tracker = OrderTracker()
+        tracker.set_pool(pool)
+        await tracker.load_recent()
+        assert tracker.count() == 1
+        order = tracker.recent(1)[0]
+        assert order.filled_quantity == 0
+        assert order.created_at == created
+        assert not tracker.rehydration_failed
+
     async def test_load_recent_rehydrates_from_db(self) -> None:
         pool = _make_pool()
         mock_conn = pool.acquire.return_value.__aenter__.return_value
@@ -106,6 +140,7 @@ class TestOrderTrackerLoadRecent:
         tracker = OrderTracker()
         await tracker.load_recent()
         assert tracker.count() == 0
+        assert not tracker.rehydration_failed
 
     async def test_load_recent_empty_db_clears_deque(self) -> None:
         pool = _make_pool()
@@ -127,6 +162,7 @@ class TestOrderTrackerLoadRecent:
         await tracker.load_recent()  # must not raise
 
         assert tracker.count() == 0
+        assert tracker.rehydration_failed
 
 
 class TestOrderTrackerInitTracker:

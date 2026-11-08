@@ -51,6 +51,41 @@ def _open_order(client_id: str = "abc", exchange_id: str | None = None) -> Order
 
 
 class TestReconcilerRunOnce:
+    @pytest.mark.parametrize("paper", [True, False])
+    async def test_partial_simulation_is_settled_but_real_partial_stays_open(
+        self, paper, mock_exchange, fake_clock, monkeypatch
+    ) -> None:
+        from trading_bot.execution.paper import PaperExchange
+
+        tracker = OrderTracker()
+        order = _open_order("partial")
+        order.status = OrderStatus.PARTIALLY_FILLED
+        order.filled_quantity = Decimal("0.005")
+        tracker.record(order)
+        monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: tracker)
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager", lambda: _mock_portfolio_manager()
+        )
+        exchange = PaperExchange() if paper else mock_exchange
+        r = Reconciler(exchange, ExchangeId.BINANCE, clock=fake_clock)
+        event = await r.run_once_as_event()
+        assert event.matched is paper
+        assert event.oms_position_count == (0 if paper else 1)
+        assert tracker.recent(1)[0].status == OrderStatus.PARTIALLY_FILLED
+
+    async def test_incomplete_history_blocks_orders(
+        self, mock_exchange, fake_clock, monkeypatch
+    ) -> None:
+        tracker = OrderTracker()
+        tracker.rehydration_failed = True
+        monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: tracker)
+        monkeypatch.setattr(
+            "trading_bot.oms.reconciler.get_portfolio_manager", lambda: _mock_portfolio_manager()
+        )
+        report = await Reconciler(mock_exchange, ExchangeId.BINANCE, clock=fake_clock).run_once()
+        assert report.orders_blocked
+        assert report.severity == "critical"
+
     @pytest.mark.asyncio
     async def test_matched_when_both_empty(
         self, mock_exchange: AsyncMock, fake_clock: FakeClock, monkeypatch: pytest.MonkeyPatch

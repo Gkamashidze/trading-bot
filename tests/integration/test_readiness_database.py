@@ -64,6 +64,51 @@ async def test_concurrent_events_form_one_verified_chain(database):
         assert await conn.fetchval("SELECT count(*) FROM audit_log") == 50
 
 
+async def test_order_restart_preserves_unfilled_rejections_and_settled_paper_partials(
+    database, monkeypatch
+):
+    from decimal import Decimal
+
+    from trading_bot.core.models import ExchangeId, OrderState, OrderStatus
+    from trading_bot.execution.paper import PaperExchange
+    from trading_bot.oms.reconciler import Reconciler
+    from trading_bot.oms.tracker import OrderTracker
+
+    writer = OrderTracker()
+    writer.set_pool(database)
+    for status, qty, filled in [
+        (OrderStatus.REJECTED, Decimal("0"), Decimal("0")),
+        (OrderStatus.PARTIALLY_FILLED, Decimal("0.01"), Decimal("0.005")),
+    ]:
+        await writer._persist(
+            OrderState(
+                client_order_id=status.value,
+                symbol="BTC/USDT",
+                exchange=ExchangeId.BINANCE,
+                side="buy",
+                order_type="market",
+                requested_quantity=qty,
+                filled_quantity=filled,
+                average_fill_price=Decimal("50000") if filled else None,
+                status=status,
+            )
+        )
+    # Rows written by the former writer used NULL for a zero filled quantity.
+    async with database.acquire() as conn:
+        await conn.execute("UPDATE paper_orders SET filled_qty = NULL WHERE status = 'rejected'")
+    restored = OrderTracker()
+    restored.set_pool(database)
+    await restored.load_recent()
+    assert restored.count() == 2
+    assert not restored.rehydration_failed
+    rejected = next(o for o in restored.recent() if o.status == OrderStatus.REJECTED)
+    assert rejected.requested_quantity == rejected.filled_quantity == 0
+    monkeypatch.setattr("trading_bot.oms.reconciler.get_order_tracker", lambda: restored)
+    reconciler = Reconciler(PaperExchange(), ExchangeId.BINANCE)
+    assert await reconciler._check_orders() == []
+    assert next(o for o in restored.recent() if o.status == OrderStatus.PARTIALLY_FILLED)
+
+
 @pytest.mark.parametrize("column,value", [("actor", "changed"), ("prev_event_hash", "fork")])
 async def test_metadata_tampering_and_forks_are_detected(database, column, value):
     audit = PostgresAuditLog(database)
