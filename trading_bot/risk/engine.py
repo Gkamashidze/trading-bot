@@ -83,7 +83,11 @@ class RiskEngine:
             if risk_state.is_trading_globally_blocked:
                 return RiskDecision(False, "persistent safety halt is active")
             state = risk_state.strategy_states.get(order.strategy_id)
-            if state is not None and state not in {"active", "reduced_risk"}:
+            if (
+                order.side == OrderSide.BUY
+                and state is not None
+                and state not in {"active", "reduced_risk"}
+            ):
                 return RiskDecision(False, "strategy is paused in persistent risk state")
             if order.symbol in risk_state.operator_locks:
                 return RiskDecision(False, "asset is locked by the operator")
@@ -116,7 +120,7 @@ class RiskEngine:
             return RiskDecision(
                 False, f"tier-2 halt: drawdown {dd_abs:.1%} >= {limit2:.1%}", tier=2
             )
-        if dd_abs >= limit1:
+        if dd_abs >= limit1 and order.side == OrderSide.BUY:
             return RiskDecision(
                 False, f"tier-1 pause: drawdown {dd_abs:.1%} >= {limit1:.1%}", tier=1
             )

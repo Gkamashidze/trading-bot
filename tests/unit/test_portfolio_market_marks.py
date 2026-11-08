@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -90,12 +91,43 @@ def test_same_day_snapshot_round_trip_keeps_exact_risk_baseline(monkeypatch, tmp
     save_snapshot(capture_snapshot(), tmp_path)
     snapshot = restore_latest_snapshot(tmp_path)
     assert snapshot is not None
+    base_file = next(tmp_path.glob("state_*.json"))
+    assert "daily_equity_peak" not in json.loads(base_file.read_text())
     restored = manager.PortfolioManager()
     restored.restore_from_snapshot(snapshot)
     actual = restored.get_snapshot()
     assert actual.total_equity == expected.total_equity
     assert actual.daily_pnl == expected.daily_pnl
     assert actual.daily_drawdown_pct == expected.daily_drawdown_pct
+
+
+def test_tier_one_and_strategy_pause_stop_entries_but_allow_inventory_reduction() -> None:
+    from trading_bot.risk.engine import RiskEngine
+    from trading_bot.state.risk_state import RiskStateSnapshot
+
+    portfolio = _portfolio()
+    portfolio.update_prices({"BTC/USDT": Decimal("88")})
+    snapshot = portfolio.get_snapshot()
+    state = RiskStateSnapshot(strategy_states={"test": "paused"})
+    sell = OrderRequest(
+        symbol="BTC/USDT",
+        exchange=ExchangeId.BINANCE,
+        side=OrderSide.SELL,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        strategy_id="test",
+    )
+    assert RiskEngine().pre_trade_check(sell, snapshot, Decimal("88"), risk_state=state).approved
+    assert (
+        not RiskEngine()
+        .pre_trade_check(
+            sell.model_copy(update={"side": OrderSide.BUY}),
+            snapshot,
+            Decimal("88"),
+            risk_state=state,
+        )
+        .approved
+    )
 
 
 def test_next_day_restore_uses_a_new_daily_baseline(monkeypatch) -> None:

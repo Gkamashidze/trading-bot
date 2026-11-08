@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from trading_bot.observability.logging import get_logger
 
@@ -26,6 +27,28 @@ log = get_logger(__name__)
 _DEFAULT_SNAPSHOT_DIR = Path("/data/snapshots")
 _FILENAME_PREFIX = "state_"
 _KEEP_LAST = 168  # 7 days x 24 h = 168 hourly snapshots
+_RISK_FIELDS = (
+    "exact_total_equity",
+    "exact_cash_balance",
+    "equity_at_day_start",
+    "daily_equity_peak",
+    "risk_day",
+)
+
+
+def _atomic_json(path: Path, data: dict[str, Any]) -> None:
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=path.parent, suffix=".tmp", delete=False
+    ) as file:
+        temporary = Path(file.name)
+        try:
+            json.dump(data, file, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+    os.replace(temporary, path)
 
 
 @dataclass
@@ -97,16 +120,13 @@ def save_snapshot(
     directory.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     path = directory / f"{_FILENAME_PREFIX}{ts}.json"
-    with tempfile.NamedTemporaryFile(mode="w", dir=directory, suffix=".tmp", delete=False) as file:
-        temporary = Path(file.name)
-        try:
-            json.dump(asdict(snapshot), file, indent=2)
-            file.flush()
-            os.fsync(file.fileno())
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
-    os.replace(temporary, path)
+    payload = asdict(snapshot)
+    risk = {key: payload.pop(key) for key in _RISK_FIELDS}
+    # Keep the base JSON readable by older releases. Write the optional exact
+    # risk checkpoint first; publishing the base file commits the complete pair.
+    if any(value is not None for value in risk.values()):
+        _atomic_json(Path(str(path) + ".risk"), risk)
+    _atomic_json(path, payload)
     log.info(
         "snapshot_saved",
         path=str(path),
@@ -132,6 +152,10 @@ def restore_latest_snapshot(
     for latest in files:
         try:
             data = json.loads(latest.read_text())
+            checkpoint = Path(str(latest) + ".risk")
+            if checkpoint.exists():
+                risk = json.loads(checkpoint.read_text())
+                data.update({key: risk[key] for key in _RISK_FIELDS if key in risk})
             snap = StateSnapshot(**data)
             captured = datetime.fromisoformat(snap.captured_at)
             if captured.tzinfo is None or captured.utcoffset() is None:
@@ -175,6 +199,7 @@ def prune_old_snapshots(
     to_delete = files[keep_last:]
     for f in to_delete:
         f.unlink()
+        Path(str(f) + ".risk").unlink(missing_ok=True)
     if to_delete:
         log.info("snapshots_pruned", removed=len(to_delete), kept=keep_last)
     return len(to_delete)
