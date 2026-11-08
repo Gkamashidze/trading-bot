@@ -24,6 +24,7 @@ log = get_logger(__name__)
 
 MIN_PAPER_DAYS = 30
 MIN_ROUND_TRIPS = 100
+MAX_RECONCILIATION_AGE_SECONDS = 300
 
 # Expected rollback runbook (Gate 0 requires a documented rollback plan).
 _ROLLBACK_RUNBOOK = Path(__file__).resolve().parents[1] / "docs/runbooks/deployment-rollback.md"
@@ -103,7 +104,9 @@ async def build_go_live_gate(pool: object, *, for_execution: bool = False) -> Go
         and reconciler.last_report is not None
         and reconciler.last_report.severity == ReconciliationSeverity.OK
         and not reconciler.orders_blocked
-        and 0 <= (datetime.now(UTC) - reconciler.last_report.run_at).total_seconds() <= 300
+        and 0
+        <= (datetime.now(UTC) - reconciler.last_report.run_at).total_seconds()
+        <= MAX_RECONCILIATION_AGE_SECONDS
     )
 
     try:

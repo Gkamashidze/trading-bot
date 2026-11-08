@@ -16,6 +16,27 @@ from trading_bot.scheduler.jobs import (
 )
 
 
+def test_reconciliation_schedule_stays_within_readiness_freshness_budget() -> None:
+    from trading_bot.go_live.builder import MAX_RECONCILIATION_AGE_SECONDS
+
+    settings = SimpleNamespace(
+        trading=SimpleNamespace(
+            crypto=SimpleNamespace(exchange="binance", symbols=[], timeframes=["1h"]),
+            equity=SimpleNamespace(exchange="alpaca", symbols=[], timeframes=["1d"]),
+        ),
+        market_context=SimpleNamespace(enabled=False),
+        evidence=SimpleNamespace(enabled=False),
+    )
+    scheduler = create_scheduler(database_url="")
+    with patch("trading_bot.config.get_settings", return_value=settings):
+        register_default_jobs(scheduler)
+    job = scheduler.get_job("reconciliation")
+    assert job is not None
+    assert job.trigger.interval.total_seconds() <= MAX_RECONCILIATION_AGE_SECONDS
+    assert job.next_run_time is not None and job.next_run_time.utcoffset() is not None
+    assert job.next_run_time <= datetime.now(UTC) + timedelta(seconds=1)
+
+
 def test_intraday_binance_jobs_are_staggered_on_startup() -> None:
     settings = SimpleNamespace(
         trading=SimpleNamespace(

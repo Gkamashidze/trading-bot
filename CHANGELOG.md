@@ -23,6 +23,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- Apply fresh WebSocket marks to open portfolio positions, measure drawdown from
+  the day's equity high-water mark without treating gains as losses, preserve
+  exact cash and daily risk baselines across recovery, and serialize concurrent
+  strategy execution. Save snapshots atomically and fall back from a damaged
+  newest snapshot to an older valid file.
+
+- Reconcile immediately after startup and every minute, within the go-live
+  readiness freshness budget, rather than letting a clean result age out between
+  the previous 30-minute checks.
+
 - Encode database UUIDs, UTC timestamps and exact monetary decimals in evidence
   endpoints, including the previously failing session report.
 - Redact secrets in third-party HTTP logs, structured fields, object values and

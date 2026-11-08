@@ -27,3 +27,10 @@ Operational effects: legacy Sharpe values no longer qualify a strategy, and new
 marked evidence must accumulate. Migration 0009 is additive and compatible with the
 previous application for rollback. Production dashboard routes require authentication;
 health probes stay public. Dependency and source scans are blocking CI checks.
+
+Portfolio risk uses fresh WebSocket marks and the day's equity high-water mark.
+Gains are not drawdowns. Exact cash, day-start equity and the daily peak are
+persisted in an atomic optional risk checkpoint beside the legacy snapshot JSON,
+so previous releases can still read the base snapshot during rollback. Recovery
+retains same-day baselines and tries an older valid snapshot if the newest pair
+is damaged. Concurrent strategy order mutations are serialized in the paper runner.

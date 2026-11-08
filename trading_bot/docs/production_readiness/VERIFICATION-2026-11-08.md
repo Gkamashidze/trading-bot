@@ -11,8 +11,8 @@ Real-money trading remains disabled. No real-money order was used as a test.
 | Python | 3.12.13, matching the production/CI minor version |
 | Ruff format and lint | Passed |
 | mypy | Passed, 165 application source files |
-| Required unit/property/replay tests | 1032 passed |
-| Coverage of configured unit-test scope | 74.63%, above the 50% required threshold |
+| Required unit/property/replay tests | 1041 passed, including marked-portfolio risk, exact recovery and schedule freshness |
+| Coverage of configured unit-test scope | 74.95%, above the 50% required threshold |
 | PostgreSQL integration tests | 8 passed on an isolated PostgreSQL 18 database |
 | Chaos/contract test selection | 16 passed |
 | Credentialed Alpaca paper execution tests | 7 skipped; no broker orders were sent |
@@ -30,6 +30,9 @@ metadata and fork detection, transactional rollback, idempotent flag changes,
 persistent risk-state restoration, a complete paper buy/sell cycle, exact fee
 accounting, inventory ownership and restart deduplication. Operator approvals are
 also tested for one persisted result and one audit event per idempotency key.
+The paper cycle also exercises concurrent strategies competing for inventory.
+Market-mark tests cover quote ordering, unrealized losses, gains versus drawdown,
+daily high-water marks, exact snapshot recovery and a damaged newest snapshot.
 
 ## Changes with operational impact
 

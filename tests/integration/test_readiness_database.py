@@ -158,6 +158,7 @@ async def test_paper_round_trip_records_real_fees_and_blocks_cross_strategy_and_
     await state._ensure_row()
     monkeypatch.setattr(risk_state, "_risk_state_store", state)
     monkeypatch.setattr(router, "_last_signal", {})
+    monkeypatch.setattr(router, "_ROUTE_LOCK", asyncio.Lock())
     monkeypatch.setattr(router, "_LAST_SIGNAL_PATH", tmp_path / "signals.json")
     monkeypatch.setattr(router, "_exchange", PaperExchange(FillModelProfile.IDEAL))
     cache = price_cache.PriceCache()
@@ -182,7 +183,10 @@ async def test_paper_round_trip_records_real_fees_and_blocks_cross_strategy_and_
 
     await price("50000")
     buy = StrategyResult(strategy_id="sma", symbol="BTC/USDT", signal="BUY", strength=1)
-    await router.route_signal(buy)
+    await asyncio.gather(
+        router.route_signal(buy),
+        router.route_signal(buy.model_copy(update={"strategy_id": "rsi"})),
+    )
     assert manager.get_portfolio_manager().get_snapshot().cash_balance == Decimal("8000")
     await price("51000")
     wrong_owner = StrategyResult(strategy_id="rsi", symbol="BTC/USDT", signal="SELL", strength=1)

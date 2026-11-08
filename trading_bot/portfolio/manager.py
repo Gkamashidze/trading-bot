@@ -38,6 +38,8 @@ class PortfolioManager:
         self._cash = initial_capital
         self._initial_capital = initial_capital
         self._equity_at_day_start = initial_capital
+        self._daily_equity_peak = initial_capital
+        self._risk_day = datetime.now(UTC).date()
 
         # Per-symbol position state (parallel dicts for simplicity)
         self._qty: dict[str, Decimal] = {}
@@ -109,11 +111,13 @@ class PortfolioManager:
                         fill_price=str(fill_price),
                         cash=str(self._cash),
                     )
+                    self.get_snapshot()
                     return
                 else:
                     self._qty[sym] = remaining
                     self._current_price[sym] = fill_price
 
+        self.get_snapshot()
         log.info(
             "paper_fill",
             symbol=sym,
@@ -125,9 +129,12 @@ class PortfolioManager:
 
     def update_prices(self, prices: dict[str, Decimal]) -> None:
         """Refresh mark-to-market prices for open positions."""
-        for sym, price in prices.items():
-            if sym in self._qty:
+        for sym in self._qty:
+            price = prices.get(sym, prices.get(sym.replace("/", "").upper()))
+            if price is not None and price.is_finite() and price > 0:
                 self._current_price[sym] = price
+        # Observe every tick's high-water mark, even between requested snapshots.
+        self.get_snapshot()
 
     def get_snapshot(self) -> PortfolioSnapshot:
         positions: list[Position] = []
@@ -149,9 +156,17 @@ class PortfolioManager:
             total_pos_value += qty * price
 
         total_equity = self._cash + total_pos_value
+        today = datetime.now(UTC).date()
+        if today != self._risk_day:
+            self._risk_day = today
+            self._equity_at_day_start = total_equity
+            self._daily_equity_peak = total_equity
+        self._daily_equity_peak = max(self._daily_equity_peak, total_equity)
         daily_pnl = total_equity - self._equity_at_day_start
         daily_dd = (
-            daily_pnl / self._equity_at_day_start if self._equity_at_day_start > 0 else Decimal("0")
+            min(Decimal("0"), (total_equity - self._daily_equity_peak) / self._daily_equity_peak)
+            if self._daily_equity_peak > 0
+            else Decimal("0")
         )
         return PortfolioSnapshot(
             cash_balance=self._cash,
@@ -167,8 +182,20 @@ class PortfolioManager:
         Backwards-compatible: old snapshots without opened_at / strategy_id
         use safe defaults (now() and empty string).
         """
-        self._cash = Decimal(str(snap.cash_balance))
-        self._equity_at_day_start = Decimal(str(snap.total_equity))
+        self._cash = Decimal(snap.exact_cash_balance or str(snap.cash_balance))
+        equity = Decimal(snap.exact_total_equity or str(snap.total_equity))
+        captured_day = datetime.fromisoformat(snap.captured_at).astimezone(UTC).date()
+        self._risk_day = datetime.now(UTC).date()
+        if (snap.risk_day or captured_day.isoformat()) == self._risk_day.isoformat():
+            self._equity_at_day_start = Decimal(
+                snap.equity_at_day_start or str(equity - Decimal(str(snap.daily_pnl)))
+            )
+            self._daily_equity_peak = Decimal(
+                snap.daily_equity_peak or str(max(equity, self._equity_at_day_start))
+            )
+        else:
+            self._equity_at_day_start = equity
+            self._daily_equity_peak = equity
 
         self._qty.clear()
         self._avg_cost.clear()
@@ -203,6 +230,8 @@ class PortfolioManager:
     def reset_day(self) -> None:
         """Call at UTC midnight to reset daily P&L baseline."""
         self._equity_at_day_start = self.get_snapshot().total_equity
+        self._daily_equity_peak = self._equity_at_day_start
+        self._risk_day = datetime.now(UTC).date()
         log.info("paper_day_reset", equity=str(self._equity_at_day_start))
 
 
