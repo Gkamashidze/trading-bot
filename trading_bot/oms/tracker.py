@@ -26,6 +26,7 @@ class OrderTracker:
     def __init__(self, max_orders: int = _MAX_ORDERS) -> None:
         self._orders: deque[OrderState] = deque(maxlen=max_orders)
         self._pool: Any = None
+        self.rehydration_failed = False
 
     def set_pool(self, pool: Any) -> None:
         self._pool = pool
@@ -62,9 +63,9 @@ class OrderTracker:
                     str(order.exchange),
                     str(order.side),
                     str(order.order_type),
-                    float(order.requested_quantity) if order.requested_quantity else None,
-                    float(order.filled_quantity) if order.filled_quantity else None,
-                    float(order.average_fill_price) if order.average_fill_price else None,
+                    order.requested_quantity,
+                    order.filled_quantity,
+                    order.average_fill_price,
                     str(order.status),
                     order.reject_reason,
                 )
@@ -75,6 +76,7 @@ class OrderTracker:
         """Rehydrate order deque from DB on startup."""
         if self._pool is None:
             return
+        self.rehydration_failed = False
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
@@ -98,20 +100,21 @@ class OrderTracker:
                         side=row["side"],
                         order_type=row["order_type"],
                         requested_quantity=Decimal(str(row["requested_qty"] or 0)),
-                        filled_quantity=Decimal(str(row["filled_qty"]))
-                        if row["filled_qty"]
-                        else None,
+                        filled_quantity=Decimal(str(row["filled_qty"] or 0)),
                         average_fill_price=Decimal(str(row["fill_price"]))
                         if row["fill_price"]
                         else None,
                         status=OrderStatus(row["status"]),
                         reject_reason=row["reject_reason"],
+                        **({"created_at": row["created_at"]} if row["created_at"] else {}),
                     )
                     self._orders.appendleft(state)
                 except Exception as e:
+                    self.rehydration_failed = True
                     log.warning("order_rehydration_row_failed", error=str(e))
             log.info("order_tracker_rehydrated", count=len(self._orders))
         except Exception as e:
+            self.rehydration_failed = True
             log.error("order_tracker_load_failed", error=str(e))
 
     def recent(self, n: int = 20) -> list[OrderState]:

@@ -29,7 +29,8 @@ from enum import StrEnum
 
 from trading_bot.core.contracts import ExchangeInterface
 from trading_bot.core.events import ReconciliationEvent
-from trading_bot.core.models import ExchangeId, OrderStatus
+from trading_bot.core.models import ExchangeId, OrderState, OrderStatus
+from trading_bot.execution.paper import PaperExchange
 from trading_bot.observability.logging import get_logger
 from trading_bot.oms.tracker import get_order_tracker
 from trading_bot.portfolio.manager import get_portfolio_manager
@@ -179,8 +180,7 @@ class Reconciler:
             + report.balance_discrepancies
             + report.position_discrepancies
         )
-        tracker = get_order_tracker()
-        oms_open = [o for o in tracker.recent(n=100) if o.status in _OPEN_STATUSES]
+        oms_open = self._oms_open_orders()
         return ReconciliationEvent(
             exchange=self._exchange_id,
             oms_position_count=len(oms_open),
@@ -208,10 +208,28 @@ class Reconciler:
 
     # ── Check methods ─────────────────────────────────────────────────────────
 
+    def _oms_open_orders(self) -> list[OrderState]:
+        # PaperExchange settles one immediate simulated fill and never queues
+        # the unfilled remainder. Keep its historical PARTIALLY_FILLED status,
+        # but do not treat that completed simulation as a resting venue order.
+        # Real exchange partial fills remain open and are always reconciled.
+        return [
+            order
+            for order in get_order_tracker().recent(n=200)
+            if order.exchange == self._exchange_id
+            and order.status in _OPEN_STATUSES
+            and not (
+                isinstance(self._exchange, PaperExchange)
+                and order.status == OrderStatus.PARTIALLY_FILLED
+            )
+        ]
+
     async def _check_orders(self) -> list[str]:
         """Compare OMS open orders vs exchange open orders."""
         tracker = get_order_tracker()
-        oms_open = [o for o in tracker.recent(n=100) if o.status in _OPEN_STATUSES]
+        if tracker.rehydration_failed:
+            return ["CRITICAL OMS history could not be fully restored"]
+        oms_open = self._oms_open_orders()
 
         try:
             exchange_open: list[dict[str, object]] = await self._exchange.fetch_open_orders()
@@ -262,7 +280,7 @@ class Reconciler:
             oms_cash = snapshot.cash_balance
         except Exception as exc:
             log.warning("reconciler_portfolio_fetch_failed", error=str(exc))
-            return []  # Can't compare without OMS state — skip
+            return ["CRITICAL OMS portfolio unavailable for balance comparison"]
 
         # Compare USDT (primary quote currency)
         exchange_usdt = exchange_balances.get("USDT", Decimal("0"))
@@ -293,7 +311,7 @@ class Reconciler:
             return ReconciliationSeverity.OK
 
         # Any "CRITICAL" keyword in balance → critical severity
-        if any("CRITICAL" in d for d in balance_discrepancies):
+        if any("CRITICAL" in d for d in all_disc):
             return ReconciliationSeverity.CRITICAL
 
         # Ghost orders or multiple discrepancies → critical
